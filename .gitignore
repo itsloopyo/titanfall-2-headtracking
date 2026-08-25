@@ -1,0 +1,35 @@
+bin/
+obj/
+build/
+out/
+release/
+dist/
+libs/
+.pixi/
+.vs/
+.vscode/
+.idea/
+*.user
+*.sln.docstates
+*.suo
+.claude/
+.lab/
+AGENTS.md
+CLAUDE.md
+*.log
+.headtracking-state.json
+NEXUS_MODS.md
+.mcp.json
+.claude.json
+CLAUDE.local.md
+CMakeUserPresets.json
+
+# Reverse engineering material stays out of the repo entirely. The game's own
+# binaries and anything derived directly from them (Ghidra projects, decompiler
+# transcripts) are Respawn's copyrighted code and live outside the working tree -
+# see .lab/NOTES.md for where. These patterns are a backstop, not the policy.
+*.gpr
+*.rep/
+client.dll
+engine.dll
+!vendor/**/*.dll

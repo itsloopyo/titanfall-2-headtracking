@@ -1,0 +1,267 @@
+name: Release
+run-name: "Release ${{ github.ref_name }}"
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Require release announcement prerequisites
+        shell: pwsh
+        env:
+          DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+          LOPARI_APP_ACTIONS_TOKEN: ${{ secrets.LOPARI_APP_ACTIONS_TOKEN }}
+        run: |
+          if (-not $env:DISCORD_RELEASE_WEBHOOK) {
+            Write-Host "::error::DISCORD_RELEASE_WEBHOOK secret is not set - every release must be announced to Discord, so this run is refused before the release is created. Set it with 'gh secret set DISCORD_RELEASE_WEBHOOK --repo ${{ github.repository }}' and re-run."
+            exit 1
+          }
+          $bust = "cb$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
+          $mods = (Invoke-RestMethod "https://lopari.app/mods.json?$bust").mods
+          $entry = @($mods) | Where-Object { $_.repo -eq "${{ github.repository }}" }
+          # The served catalog is ALREADY filtered to public entries - update-metadata.mjs
+          # writes the Pages copy as { ...catalog, mods: publicMods } - so there is no
+          # public/private test to make here; anything we find is public by construction.
+          #
+          # External is our own heuristic, not a field lopari consults: those installs route
+          # to a third-party mod manager and ship no *-installer.zip, and an installer zip is
+          # what update-metadata.mjs actually requires before it will stamp a pin.
+          #
+          # Known gap, deliberately left loud: lopari also skips any entry that is not yet
+          # `released` and has no dev-release, so a mod's FIRST stable release is never
+          # auto-pinned and the poll below runs its deadline out. That failure is correct -
+          # the Run in Lopari link really would be stale - and the timeout message says so.
+          if ($entry -and @($entry)[0].install_strategy -eq 'External') { $entry = $null }
+          if ($entry -and -not $env:LOPARI_APP_ACTIONS_TOKEN) {
+            Write-Host "::error::${{ github.repository }} is in the Lopari catalog but LOPARI_APP_ACTIONS_TOKEN is not set - the catalog pin can't be synced before the announcement, so the Run in Lopari link would serve the previous release. Set the fine-grained PAT (Actions:write on itsloopyo/lopari.app only) and re-run."
+            exit 1
+          }
+          Write-Host "Release announcement prerequisites present."
+
+      - name: Checkout code
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Extract version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ($tag -notmatch "^v(\d+\.\d+\.\d+)$") {
+            Write-Host "::error::Tag format invalid. Use semantic versioning: v1.2.3"
+            exit 1
+          }
+          $version = $matches[1]
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+          echo "tag=$tag" >> $env:GITHUB_OUTPUT
+          Write-Host "Version: $version"
+
+      - name: Validate version matches src/version.h
+        shell: pwsh
+        run: |
+          $tagVersion = "${{ steps.version.outputs.version }}"
+          $content = Get-Content "src/version.h" -Raw
+
+          $headerVersion = [regex]::Match($content, 'HEADTRACKING_VERSION_STRING\s+"([^"]+)"').Groups[1].Value
+          if (-not $headerVersion) {
+            Write-Host "::error::Could not parse HEADTRACKING_VERSION_STRING from src/version.h"
+            exit 1
+          }
+
+          if ($headerVersion -ne $tagVersion) {
+            Write-Host "::error::Tag version ($tagVersion) does not match src/version.h ($headerVersion)"
+            exit 1
+          }
+
+          Write-Host "Version match: $headerVersion" -ForegroundColor Green
+
+      - name: Setup Visual Studio environment
+        uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # v3
+
+      - name: Setup pixi
+        uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
+
+      # Characterization tests for the camera maths, before anything is cut.
+      - name: Run tests
+        shell: pwsh
+        run: pixi run test
+
+      # Same command as build.yml and developers run - no build logic in YAML.
+      - name: Build and package
+        shell: pwsh
+        run: pixi run package
+
+      # A manifest naming a file the ZIP does not contain makes the launcher
+      # copy the mod into folders nothing loads while reporting "Installed".
+      # That has shipped before; it fails the build here instead.
+      - name: Validate launcher manifest
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem release -Filter '*-installer.zip' |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $zip) { Write-Host "::error::no installer ZIP to validate"; exit 1 }
+          node cameraunlock-core/scripts/validate-manifest.mjs $zip.FullName
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::manifest validation failed"; exit 1 }
+
+      - name: Generate release notes
+        shell: pwsh
+        run: |
+          $artifactPaths = @(
+            "src/"
+            "cameraunlock-core"
+            "scripts/install.cmd"
+            "scripts/uninstall.cmd"
+          )
+
+          & cameraunlock-core/scripts/generate-release-notes.ps1 `
+            -Version "${{ steps.version.outputs.version }}" `
+            -ArtifactPaths $artifactPaths `
+            -ProjectName "Head Tracking for Titanfall 2"
+
+      - name: Find release ZIPs
+        id: find_zip
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $installerZip = "release/Titanfall2HeadTracking-v$version-installer.zip"
+          $nexusZip = "release/Titanfall2HeadTracking-v$version-nexus.zip"
+
+          foreach ($zip in @($installerZip, $nexusZip)) {
+            if (-not (Test-Path $zip)) {
+              Write-Host "::error::Release ZIP not found at $zip"
+              exit 1
+            }
+            Write-Host "Found ZIP: $zip"
+          }
+
+          echo "installer_zip=$installerZip" >> $env:GITHUB_OUTPUT
+          echo "nexus_zip=$nexusZip" >> $env:GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.version.outputs.tag }}"
+          $installerZip = "${{ steps.find_zip.outputs.installer_zip }}"
+          $nexusZip = "${{ steps.find_zip.outputs.nexus_zip }}"
+
+          Write-Host "Creating GitHub Release for $tag..." -ForegroundColor Cyan
+
+          gh release create $tag `
+            --title "Head Tracking for Titanfall 2 $tag" `
+            --notes-file "release-notes.txt" `
+            $installerZip $nexusZip
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Failed to create GitHub release"
+            exit 1
+          }
+
+          Write-Host "Release created successfully" -ForegroundColor Green
+
+      - name: Sync Lopari catalog pin
+        shell: pwsh
+        env:
+          LOPARI_APP_ACTIONS_TOKEN: ${{ secrets.LOPARI_APP_ACTIONS_TOKEN }}
+          # See the note in discord-announce-step.yml: a tag name is attacker-controlled
+          # text and must not be interpolated into a run block that holds a token.
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $repo = "${{ github.repository }}"
+          $version = $env:REF_NAME -replace '^v', ''
+          function Get-PinnedVersion {
+            $bust = "cb$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
+            $mods = (Invoke-RestMethod "https://lopari.app/mods.json?$bust").mods
+            $entry = @($mods) | Where-Object { $_.repo -eq $repo }
+            if (-not $entry) { return $null }
+            # See the note on the prerequisites step above: the served catalog is already
+            # public-only, External is our stand-in for "ships no installer zip", and a
+            # first release genuinely has no pin to find until lopari stamps one.
+            if (@($entry)[0].install_strategy -eq 'External') { return $null }
+            return @{ inCatalog = $true; pinned = $entry.release.pinned.version }
+          }
+          $state = Get-PinnedVersion
+          if (-not $state) {
+            Write-Host "::notice::$repo has no syncable Lopari catalog pin (no entry, or External install strategy) - the /run/ page serves its own install steps."
+            exit 0
+          }
+          if ($state.pinned -eq $version) {
+            Write-Host "Catalog already pins $version."
+            exit 0
+          }
+          function Request-Repin {
+            Invoke-RestMethod -Method Post `
+              -Uri 'https://api.github.com/repos/itsloopyo/lopari.app/actions/workflows/update-pins.yml/dispatches' `
+              -Headers @{ Authorization = "Bearer $env:LOPARI_APP_ACTIONS_TOKEN"; Accept = 'application/vnd.github+json' } `
+              -ContentType 'application/json' -Body '{"ref":"main"}'
+          }
+          Request-Repin
+          Write-Host "Requested lopari.app catalog re-pin; waiting for $version to go live..."
+          $deadline = [DateTime]::UtcNow.AddMinutes(10)
+          $tick = 0
+          while ([DateTime]::UtcNow -lt $deadline) {
+            Start-Sleep -Seconds 15
+            $tick++
+            try {
+              $state = Get-PinnedVersion
+            } catch {
+              # A transient fetch failure is part of what the poll absorbs;
+              # a persistent one runs into the deadline below.
+              continue
+            }
+            if ($state.pinned -eq $version) {
+              Write-Host "Catalog pin is live: $version."
+              exit 0
+            }
+            Write-Host "  still pinned at $($state.pinned)..."
+            # Two releases dispatching within a minute of each other put two pin
+            # runs on the same base commit; the loser's push is rejected and
+            # nothing retries it before the hourly schedule. Ask again.
+            if ($tick % 5 -eq 0) {
+              Write-Host "  re-requesting the catalog re-pin..."
+              Request-Repin
+            }
+          }
+          Write-Host "::error::Timed out waiting for lopari.app to pin $version (still $($state.pinned)). Check https://github.com/itsloopyo/lopari.app/actions, then re-run this job - the release exists; only the pin sync and announcement are pending."
+          exit 1
+
+      - name: Announce release to Discord
+        shell: pwsh
+        env:
+          DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+          # Read through the environment, never interpolated into the script body.
+          # ${{ }} is substituted textually before pwsh parses the run block, so a tag
+          # name containing a double quote closes the assignment and the remainder runs
+          # as code - in a job that holds the release webhook and contents:write.
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if (-not $env:DISCORD_RELEASE_WEBHOOK) {
+            Write-Host "::error::DISCORD_RELEASE_WEBHOOK secret is not set - the release was created but not announced. Set it with 'gh secret set DISCORD_RELEASE_WEBHOOK --repo ${{ github.repository }}' and re-run this job."
+            exit 1
+          }
+          $tag  = $env:REF_NAME
+          $repo = "${{ github.repository }}"
+          $name = (Get-Culture).TextInfo.ToTitleCase(((($repo -split '/')[-1]) -replace '-head-?tracking$','' -replace '-',' '))
+          $url  = "https://github.com/$repo/releases/tag/$tag"
+          $payload = @{
+            username = 'Mod Releases'
+            embeds   = @(@{
+              title       = "$name Head Tracking $tag"
+              url         = $url
+              description = "A new release of **$name Head Tracking** is live.`n`n**[Download the $tag release]($url)**`n**[Run in Lopari](https://lopari.app/run/?repo=$repo)**"
+              color       = 5814783
+            })
+          } | ConvertTo-Json -Depth 5
+          Invoke-RestMethod -Uri $env:DISCORD_RELEASE_WEBHOOK -Method Post -ContentType 'application/json' -Body $payload
+          Write-Host "Announced $tag to Discord."

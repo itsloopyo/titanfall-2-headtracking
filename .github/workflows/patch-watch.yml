@@ -1,0 +1,119 @@
+name: Patch watch
+
+# Titanfall 2's client.dll and engine.dll RVAs are pinned per build, so a game
+# patch makes the mod go dormant until a new build profile is added. This asks
+# Steam once a day for the app's public-branch buildid and opens a rederive
+# issue the first time it changes, so a release can be prepared before users hit
+# the dormant log line. It is a heads-up channel, never the safety mechanism -
+# the in-process PE fingerprint check is what keeps a patched game playable.
+
+on:
+  schedule:
+    - cron: '41 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: patch-watch
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      # Pinned to the commit SHA - tags are mutable. Node-24 runtime.
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          submodules: recursive
+
+      - name: Query Steam for the public-branch buildid
+        id: steam
+        run: |
+          set -euo pipefail
+          APPID=$(python3 -c "import json;print(json.load(open('cameraunlock-core/data/games.json'))['games']['titanfall-2']['steam_app_id'])")
+          echo "appid=$APPID" >> "$GITHUB_OUTPUT"
+
+          docker run --rm steamcmd/steamcmd:ubuntu-22 \
+            +login anonymous +app_info_update 1 +app_info_print "$APPID" +quit > steamcmd.txt
+
+          # The buildid we want is the one under branches -> public. Anything
+          # else (beta branches, depot ids) is a different number entirely, so
+          # parse the block rather than grepping the first match.
+          BUILDID=$(python3 <<'PY'
+          import re, sys
+          text = open('steamcmd.txt', encoding='utf-8', errors='replace').read()
+          m = re.search(r'"branches"\s*\{(.*)', text, re.S)
+          if not m:
+              sys.exit("no branches block in steamcmd output")
+          m2 = re.search(r'"public"\s*\{(.*?)\}', m.group(1), re.S)
+          if not m2:
+              sys.exit("no public branch in steamcmd output")
+          m3 = re.search(r'"buildid"\s*"(\d+)"', m2.group(1))
+          if not m3:
+              sys.exit("no buildid in public branch")
+          print(m3.group(1))
+          PY
+          )
+          echo "buildid=$BUILDID" >> "$GITHUB_OUTPUT"
+          echo "public-branch buildid: $BUILDID"
+
+      - name: Compare against the last known buildid
+        id: compare
+        run: |
+          set -euo pipefail
+          LAST=$(cat .github/last-known-build.txt 2>/dev/null || echo "")
+          echo "last=$LAST" >> "$GITHUB_OUTPUT"
+          if [ "$LAST" = "${{ steps.steam.outputs.buildid }}" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open a rederive issue
+        if: steps.compare.outputs.changed == 'true' && steps.compare.outputs.last != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create \
+            --title "Titanfall 2 build ${{ steps.steam.outputs.buildid }} published - check the module fingerprints" \
+            --body "$(cat <<'EOF'
+          Steam's public branch moved to a new buildid, so the pinned
+          `CViewRender::RenderView` RVA, the render view field offsets, the
+          `IVEngineClient` pointer and the host pause flag may no longer be valid.
+
+          A buildid change is **not** proof the binaries changed - asset-only
+          patches move it and leave `client.dll` / `engine.dll` untouched.
+          Closing this with no code change is a normal outcome.
+
+          - [ ] Update the game, then run `pixi run check-fingerprint`. It prints
+                BOTH module fingerprints; a profile needs both to match.
+          - [ ] If the fingerprints match an existing profile: close, nothing to do.
+          - [ ] Otherwise add a NEW `kSteamProfile_YYYYMMDD` to the top of
+                `kKnownProfiles` in `src/build_profile.cpp`. Never edit an
+                existing profile's RVAs - users on the old build must keep working.
+                A profile with zero offsets is safe to land immediately: the mod
+                recognises the build and stays dormant on it.
+          - [ ] Rederive the offsets (`.lab/NOTES.md` documents every one of them
+                and how it was found; `[Debug] DumpViewSetup=1` re-reads the
+                render view layout off a live frame, and `.lab/pause_probe.py`
+                re-finds the pause flag).
+          - [ ] Verify in game with `.lab/run_axis_tests.ps1` and
+                `.lab/verify_pause_gate.ps1`.
+          - [ ] CHANGELOG entry as an addition: "adds support for Steam build
+                <buildid>; earlier builds keep working".
+          EOF
+          )"
+
+      - name: Record the new buildid
+        if: steps.compare.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          echo "${{ steps.steam.outputs.buildid }}" > .github/last-known-build.txt
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .github/last-known-build.txt
+          git commit -m "chore: record Titanfall 2 build ${{ steps.steam.outputs.buildid }} [skip ci]"
+          git push

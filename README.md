@@ -2,7 +2,7 @@
 
 ![Titanfall 2 running with this mod](https://raw.githubusercontent.com/itsloopyo/titanfall-2-headtracking/main/assets/readme-clip.gif)
 
-Head tracking for Titanfall 2 that lets your head move the view while your mouse or controller keeps full control of your aim, using a webcam, a phone, or any OpenTrack compatible source, no VR headset required
+An unofficial head tracking mod for Titanfall 2 that moves the view with your head while your mouse or controller keeps aiming, driven by a webcam, phone, or any OpenTrack compatible tracker, with no VR headset required.
 
 > **Campaign only, uninstall it before you play multiplayer.** Decoupled
 > look from aim gives an unfair advantage online, so the mod applies nothing

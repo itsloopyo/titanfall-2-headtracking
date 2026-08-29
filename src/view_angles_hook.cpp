@@ -115,6 +115,8 @@ const float* CleanViewAngles() { return g_clean; }
 
 void ReleaseViewAngles() { g_released = true; }
 
+bool ViewRotationLive() { return !g_released; }
+
 bool InstallViewAnglesHook() {
     void* target = reinterpret_cast<void*>(ClientBase() + ActiveProfile().offsets.view_build_rva);
     auto& hooks = cameraunlock::hooks::HookManager::Instance();

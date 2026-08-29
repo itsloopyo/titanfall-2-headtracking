@@ -57,4 +57,10 @@ const float* CleanViewAngles();
 // must not leave the frustum aimed at a pose nothing is drawing any more.
 void ReleaseViewAngles();
 
+// False until then. Anything ELSE that turns with the head has to ask before it
+// turns - the Titan cockpit is held still in the picture by the camera moving
+// under it by the same amount, so a cockpit that keeps turning after the camera
+// has gone back to the game's own is not degraded, it is actively wrong.
+bool ViewRotationLive();
+
 }  // namespace headtracking

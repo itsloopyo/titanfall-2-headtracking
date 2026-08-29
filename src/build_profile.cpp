@@ -111,6 +111,34 @@ namespace {
 // rather than read as one - fine for a harness to read the aim from, useless to
 // write.
 //
+// 0x4e4000 is C_Titan_Cockpit::CalcView(this, Vector* origin, QAngle* angles) -
+// the transform the Titan cockpit is drawn with. It scales the player's pitch by
+// `cockpit_pitch_up_frac` / `cockpit_pitch_down_frac` (whose convar objects it
+// reads at +0x58, the same value offset the FOV control uses), subtracts the
+// cockpit drift computed at 0x2c58b0 from the four `cockpitDrift_*` convars, and
+// ends on Source's usual ApplyShake(origin, angles, 1.0) through the view-effects
+// interface at 0x363ff0.
+//
+// Its ONE caller, 0x141d90, resolves an entity handle and __RTDynamicCasts it
+// from C_BaseEntity to C_Titan_Cockpit before calling, so the detour runs when
+// there is a cockpit to place and never otherwise - which is the whole Titan
+// gate, with no flag to read and none to get wrong. That caller is reached from
+// SetUpView (0x35aef0) at +0x247, and SetUpView builds the frame's camera at
+// +0x9fc, so the cockpit is placed BEFORE the view the head rotation goes into.
+// That ordering is why the cockpit hook is the one that decides the frame's pose
+// (camera_hook.h, OpenFrame).
+//
+// 0x19a9f0 is the client's world-to-screen: it asks the CViewRender for the
+// frame's world-to-screen matrix (vtable slot 14, which returns the pointer at
+// CViewRender+0x12ef90), projects through it with the row-major helper at
+// 0x366010, and scales the result into pixels. Found from the other end - the
+// `screen_indicator_ellipse_width` / `_height` / `_back_range` / `_pitch_limit` /
+// `_pitch_scale` convars, whose one common consumer (0x199330) is the placement
+// that clamps an off-screen marker onto an ellipse. Its sibling 0x199830 and the
+// `GetEntScreenSpaceBounds` script native above them (registered at 0x13ed70,
+// reached through 0x15c050 and 0x14d370) all bottom out in 0x19a9f0, which makes
+// it the single point every world-anchored HUD mark is placed through.
+//
 // engine.dll+0x7a6620 is the host's pause flag, sitting three fields ahead of
 // the server-side level name at 0x7a6634. Found by snapshotting the module's
 // writable pages across four pause/unpause transitions and asking for the bytes
@@ -150,9 +178,11 @@ constexpr BuildProfile kSteamProfile_20171205 = {
         .rui_create_rva       = 0x3092E0u,  // the client's RUI instance allocator
         .rui_instance_table   = 0x1E7A5C0u, // entries of 0x20, instance at +0x08
         .crosshair_state      = 0x22AC694u,
+        .world_to_screen_rva  = 0x19A9F0u,  // world position -> screen pixels
         .trace_line_rva       = 0x348AE0u,
         .trace_endpos         = 0x10u,      // trace_t: hit position
         .trace_fraction       = 0x30u,      // trace_t: 1.0 = hit nothing
+        .cockpit_calc_view_rva = 0x4E4000u,  // C_Titan_Cockpit::CalcView
         .cvar_interface_ptr   = 0x2E43F80u,
         .find_var_slot        = 0x80u,      // ICvar::FindVar
         .convar_float         = 0x58u,      // ConVar::m_fValue, m_nValue at 0x5c

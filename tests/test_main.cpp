@@ -21,8 +21,10 @@
 #include <limits>
 
 #include "ads.h"
+#include "ads_blend.h"
 #include "ads_gate.h"
 #include "aim_projection.h"
+#include "marker_projection.h"
 #include "rui_transform.h"
 #include "angle_units.h"
 #include "config.h"
@@ -200,6 +202,56 @@ void TestCameraLocalRotation() {
     float steep[3] = { 80.0f, 0.0f, 0.0f };
     ApplyCameraLocalRotation(steep, 0.0f, 30.0f, 0.0f);
     CHECK(std::fabs(steep[2]) > 1.0f);
+}
+
+// The rotation the head puts into the CAMERA, carried onto something that is
+// not the camera. This is what holds the Titan cockpit still in the picture,
+// and the cases below are the ones that separate it from the wrong answer -
+// composing the delta onto the cockpit's own angles - which agrees only while
+// the cockpit and the camera point the same way.
+void TestCarryRotation() {
+    // A camera that did not move carries nothing, whatever the cockpit is at.
+    const float still[3] = { 12.0f, -40.0f, 3.0f };
+    float cockpit[3] = { 5.0f, -38.0f, 1.0f };
+    const float before[3] = { cockpit[0], cockpit[1], cockpit[2] };
+    CarryRotation(still, still, cockpit);
+    for (int i = 0; i < 3; ++i) CHECK_NEAR(cockpit[i], before[i], 1e-3f);
+
+    // A cockpit that IS the camera ends up exactly where the camera did: the
+    // carry reduces to the delta, which is the sanity check that it is the same
+    // rotation and not merely a similar one.
+    const float clean[3] = { 0.0f, 30.0f, 0.0f };
+    float drawn[3] = { clean[0], clean[1], clean[2] };
+    ApplyWorldSpaceRotation(drawn, 10.0f, -20.0f, 6.0f);
+    float same[3] = { clean[0], clean[1], clean[2] };
+    CarryRotation(clean, drawn, same);
+    for (int i = 0; i < 3; ++i) CHECK_NEAR(same[i], drawn[i], 1e-3f);
+
+    // The case the mod is actually in: the game holds the cockpit back to a
+    // fraction of the player's pitch, so it is NOT the camera. A pure head yaw
+    // about world up has to move the cockpit's yaw by the same amount and leave
+    // its held-back pitch alone.
+    const float pitched[3] = { 40.0f, 30.0f, 0.0f };
+    float held[3] = { 16.0f, 30.0f, 0.0f };   // pitch scaled by 0.4
+    float yawed[3] = { pitched[0], pitched[1], pitched[2] };
+    ApplyWorldSpaceRotation(yawed, 0.0f, 25.0f, 0.0f);
+    CarryRotation(pitched, yawed, held);
+    CHECK_NEAR(held[0], 16.0f, 1e-3f);
+    CHECK_NEAR(held[1], 55.0f, 1e-3f);
+    CHECK_NEAR(held[2], 0.0f, 1e-3f);
+
+    // And the difference from the wrong answer is real, not a rounding tie: on
+    // a combined delta with the cockpit pitched away from the view, carrying it
+    // and composing onto it land in different places.
+    float carried[3] = { 16.0f, 30.0f, 0.0f };
+    float composed[3] = { 16.0f, 30.0f, 0.0f };
+    float combined[3] = { pitched[0], pitched[1], pitched[2] };
+    ApplyWorldSpaceRotation(combined, 12.0f, 20.0f, 15.0f);
+    CarryRotation(pitched, combined, carried);
+    ApplyWorldSpaceRotation(composed, 12.0f, 20.0f, 15.0f);
+    float apart = 0.0f;
+    for (int i = 0; i < 3; ++i) apart += std::fabs(carried[i] - composed[i]);
+    CHECK(apart > 1.0f);
 }
 
 // ---- view_matrix -----------------------------------------------------------
@@ -641,6 +693,111 @@ void TestAimBehindTheViewIsRejected() {
     CHECK(!ProjectAimToNdc(aim, fwd, right, up, 0.934f, 0.525f, x, y));
 }
 
+// ---- marker_projection -----------------------------------------------------
+//
+// The world-anchored HUD marks are placed by the GAME's world-to-screen, which
+// projects with the clean camera. The mod moves the world point instead of the
+// mark, so the invariant that matters is the round trip: the moved point seen
+// from the CLEAN camera must land exactly where the real point lands seen from
+// the DRAWN one. Everything else - the ellipse clamp, the behind test - is
+// downstream of that one equality.
+
+FrameCameras BuildCameras(const float cleanAng[3], float dpitch, float dyaw, float droll,
+                          float leanRight, float leanUp, float leanFwd) {
+    FrameCameras c = {};
+    AngleVectors(cleanAng, c.cleanFwd, c.cleanRight, c.cleanUp);
+    float drawnAng[3] = { cleanAng[0], cleanAng[1], cleanAng[2] };
+    ApplyCameraLocalRotation(drawnAng, dpitch, dyaw, droll);
+    AngleVectors(drawnAng, c.drawnFwd, c.drawnRight, c.drawnUp);
+    for (int i = 0; i < 3; ++i) {
+        c.cleanEye[i] = 0.0f;
+        c.drawnEye[i] = c.cleanRight[i] * leanRight + c.cleanUp[i] * leanUp
+                      + c.cleanFwd[i] * leanFwd;
+    }
+    return c;
+}
+
+bool ProjectFromEye(const float point[3], const float eye[3], const float fwd[3],
+                    const float right[3], const float up[3], float& x, float& y) {
+    float rel[3], len = 0.0f;
+    for (int i = 0; i < 3; ++i) {
+        rel[i] = point[i] - eye[i];
+        len += rel[i] * rel[i];
+    }
+    len = std::sqrt(len);
+    for (int i = 0; i < 3; ++i) rel[i] /= len;
+    return ProjectAimToNdc(rel, fwd, right, up, 0.934f, 0.525f, x, y);
+}
+
+void TestMarkerUntrackedFrameIsIdentity() {
+    const float clean[3] = { 4.0f, 137.0f, -6.0f };
+    const FrameCameras c = BuildCameras(clean, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+    const float p[3] = { 512.0f, -73.0f, 220.0f };
+    float moved[3];
+    ReprojectWorldPoint(c, p, moved);
+    for (int i = 0; i < 3; ++i) CHECK_NEAR(moved[i], p[i], 1e-2f);
+}
+
+void TestMarkerLandsWhereTheDrawnCameraPutsIt() {
+    // Combined poses, not one axis at a time: a formula that is right on single
+    // axes and wrong on combinations is exactly the bug that survives testing.
+    const float poses[][3] = {
+        { 0.0f, 25.0f, 0.0f },
+        { 12.0f, 0.0f, 0.0f },
+        { 0.0f, 0.0f, 20.0f },
+        { 10.0f, -18.0f, 14.0f },
+    };
+    const float cleanAngles[][3] = {
+        { 0.0f, 0.0f, 0.0f },
+        { -8.0f, 210.0f, 3.0f },
+    };
+    const float points[][3] = {
+        { 900.0f, 0.0f, 0.0f },
+        { 300.0f, 450.0f, 120.0f },
+        { -600.0f, 200.0f, -80.0f },
+    };
+
+    for (const auto& clean : cleanAngles) {
+        for (const auto& pose : poses) {
+            const FrameCameras c = BuildCameras(clean, pose[0], pose[1], pose[2],
+                                                9.0f, -4.0f, 6.0f);
+            for (const auto& p : points) {
+                float wantX = 0.0f, wantY = 0.0f;
+                if (!ProjectFromEye(p, c.drawnEye, c.drawnFwd, c.drawnRight, c.drawnUp,
+                                    wantX, wantY)) {
+                    continue;   // behind the drawn view: nothing to agree about
+                }
+                float moved[3];
+                ReprojectWorldPoint(c, p, moved);
+                float gotX = 0.0f, gotY = 0.0f;
+                CHECK(ProjectFromEye(moved, c.cleanEye, c.cleanFwd, c.cleanRight, c.cleanUp,
+                                     gotX, gotY));
+                CHECK_NEAR(gotX, wantX, 1e-3f);
+                CHECK_NEAR(gotY, wantY, 1e-3f);
+            }
+        }
+    }
+}
+
+void TestMarkerKeepsItsDistance() {
+    // Depth has to survive the move, or the behind-the-camera test the callers
+    // branch on answers about a point that is not where the marker is.
+    const float clean[3] = { 5.0f, 40.0f, 0.0f };
+    const FrameCameras c = BuildCameras(clean, -7.0f, 30.0f, 11.0f, 12.0f, 3.0f, -5.0f);
+    const float p[3] = { 250.0f, -400.0f, 60.0f };
+    float moved[3];
+    ReprojectWorldPoint(c, p, moved);
+
+    float before = 0.0f, after = 0.0f;
+    for (int i = 0; i < 3; ++i) {
+        const float a = p[i] - c.drawnEye[i];
+        const float b = moved[i] - c.cleanEye[i];
+        before += a * a;
+        after += b * b;
+    }
+    CHECK_NEAR(std::sqrt(after), std::sqrt(before), 1e-2f);
+}
+
 // ---- ads_pose --------------------------------------------------------------
 //
 // The entry pose is what makes the tracked ADS modes swing onto the aim and then
@@ -773,6 +930,66 @@ void TestAdsPoseLoweringTheWeaponDropsTheEntry() {
     CHECK_NEAR(again.yaw, 0.0f, 1e-6f);
 }
 
+// ---- ads_blend -------------------------------------------------------------
+//
+// What the ADS fade does to the frame's pose. The one rule that is not obvious
+// from either end of it is that ROLL is not in the fade at all: a head tilt
+// moves neither the eye off the barrel nor the aim off the middle of the frame,
+// and levelling it every time the sights come up is two horizon jolts per aim
+// for nothing. It shipped faded in `paused` and was reported from the chair as
+// roll switching off in a Titan the moment the sights came up.
+
+void TestAdsBlendHipIsTheHeadPose() {
+    const auto absolute = MakePose(5.0f, -12.0f, 3.0f, 1.0f, 2.0f, 3.0f);
+    const auto relative = MakePose(0.0f, 0.0f, 3.0f, 0.0f, 0.0f, 0.0f);
+    for (const AdsMode mode : { AdsMode::Paused, AdsMode::Marker, AdsMode::Tracked }) {
+        const auto out = BlendAdsPose(mode, 1.0f, absolute, relative);
+        CHECK_NEAR(out.pitch, 5.0f, 1e-6f);
+        CHECK_NEAR(out.yaw, -12.0f, 1e-6f);
+        CHECK_NEAR(out.roll, 3.0f, 1e-6f);
+        CHECK_NEAR(out.z, 3.0f, 1e-6f);
+    }
+}
+
+// Sights fully up in `paused`: the view is the game's again, apart from the tilt
+// the player is holding.
+void TestAdsBlendPausedKeepsRollAndDropsTheRest() {
+    const auto absolute = MakePose(5.0f, -12.0f, 3.0f, 1.0f, 2.0f, 3.0f);
+    const auto out = BlendAdsPose(AdsMode::Paused, 0.0f, absolute, MakePose(0, 0, 3.0f));
+    CHECK_NEAR(out.pitch, 0.0f, 1e-6f);
+    CHECK_NEAR(out.yaw, 0.0f, 1e-6f);
+    CHECK_NEAR(out.x, 0.0f, 1e-6f);
+    CHECK_NEAR(out.y, 0.0f, 1e-6f);
+    CHECK_NEAR(out.z, 0.0f, 1e-6f);
+    CHECK_NEAR(out.roll, 3.0f, 1e-6f);
+}
+
+// And halfway through the fade the tilt is still whole - it does not sag toward
+// level and come back.
+void TestAdsBlendPausedDoesNotFadeRollThroughTheTransition() {
+    const auto absolute = MakePose(8.0f, -20.0f, 3.0f, 0.0f, 0.0f, 4.0f);
+    const auto out = BlendAdsPose(AdsMode::Paused, 0.5f, absolute, MakePose(0, 0, 3.0f));
+    CHECK_NEAR(out.pitch, 4.0f, 1e-6f);
+    CHECK_NEAR(out.yaw, -10.0f, 1e-6f);
+    CHECK_NEAR(out.z, 2.0f, 1e-6f);
+    CHECK_NEAR(out.roll, 3.0f, 1e-6f);
+}
+
+// The tracked modes land on the entry-relative pose, whose roll is the absolute
+// one already - so the two branches agree about roll and about nothing else.
+void TestAdsBlendTrackedLandsOnTheEntryRelativePose() {
+    const auto absolute = MakePose(5.0f, -12.0f, 3.0f, 1.0f, 2.0f, 3.0f);
+    const auto relative = MakePose(2.0f, -4.0f, 3.0f, 0.5f, 0.5f, 1.0f);
+    for (const AdsMode mode : { AdsMode::Marker, AdsMode::Tracked }) {
+        const auto out = BlendAdsPose(mode, 0.0f, absolute, relative);
+        CHECK_NEAR(out.pitch, 2.0f, 1e-6f);
+        CHECK_NEAR(out.yaw, -4.0f, 1e-6f);
+        CHECK_NEAR(out.x, 0.5f, 1e-6f);
+        CHECK_NEAR(out.z, 1.0f, 1e-6f);
+        CHECK_NEAR(out.roll, 3.0f, 1e-6f);
+    }
+}
+
 // ---- ads_gate --------------------------------------------------------------
 //
 // The verdict walk. ADS is tested last so a menu still reports its own reason
@@ -857,6 +1074,7 @@ int main() {
     TestBasisToAnglesAtPole();
     TestClampPitch();
     TestWorldSpaceRotation();
+    TestCarryRotation();
     TestCameraLocalRotation();
     TestViewRoundTrip();
     TestComposeViewBottomRow();
@@ -881,6 +1099,9 @@ int main() {
     TestAimBehindTheViewIsRejected();
     TestNdcToPixelsIsCentredAtZero();
     TestNdcToPixelsSpansHalfTheFrame();
+    TestMarkerUntrackedFrameIsIdentity();
+    TestMarkerLandsWhereTheDrawnCameraPutsIt();
+    TestMarkerKeepsItsDistance();
     TestAdsPoseHipPassesThrough();
     TestAdsPoseEntryFrameIsIdentity();
     TestAdsPoseRollStaysAbsolute();
@@ -888,6 +1109,10 @@ int main() {
     TestAdsPosePitchAndPositionAreRelative();
     TestAdsPoseCaptureWaitsForALiveRotation();
     TestAdsPoseLoweringTheWeaponDropsTheEntry();
+    TestAdsBlendHipIsTheHeadPose();
+    TestAdsBlendPausedKeepsRollAndDropsTheRest();
+    TestAdsBlendPausedDoesNotFadeRollThroughTheTransition();
+    TestAdsBlendTrackedLandsOnTheEntryRelativePose();
     TestGatePausedModeClosesTheGateAndStillReportsTheSights();
     TestGateTrackedModesStayOpenThroughAnAim();
     TestGateHipFireIsActiveInEveryMode();

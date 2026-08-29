@@ -49,6 +49,7 @@
 
 #include "cameraunlock/hooks/hook_manager.h"
 #include "ads.h"
+#include "ads_blend.h"
 #include "ads_gate.h"
 #include "ads_marker.h"
 #include "ads_state.h"
@@ -64,6 +65,7 @@
 #include "hit_indicator.h"
 #include "source_angles.h"
 #include "view_matrix.h"
+#include "world_marker_hook.h"
 
 namespace headtracking {
 
@@ -575,7 +577,8 @@ void LogAdsEdge(bool aiming, AdsMode mode) {
     }
     switch (mode) {
         case AdsMode::Paused:
-            HT_LOG("[ads] sights up - head tracking paused, view settling onto the aim");
+            HT_LOG("[ads] sights up - head tracking paused, view settling onto the aim; a head "
+                   "tilt still rolls it");
             break;
         case AdsMode::Marker:
             HT_LOG("[ads] sights up - view settling onto the aim, head tracking carries on "
@@ -627,6 +630,9 @@ FrameDelta ComputeFrameDelta(Plugin& plugin, SessionKind session, bool aiming) {
     //                    which is identity at that moment, so head tracking
     //                    carries on from the aim rather than from centre.
     //
+    // Roll is in neither fade, in any mode - see BlendAdsPose, which is where
+    // that and the rest of the shape live.
+    //
     // Both are asked in every mode, so the entry pose is dropped when the weapon
     // comes down whichever mode was live while it was up, and a mode cycled
     // mid-aim takes effect on that aim.
@@ -634,27 +640,13 @@ FrameDelta ComputeFrameDelta(Plugin& plugin, SessionKind session, bool aiming) {
     const float scale = g_adsFade.Update(d.aiming, GetTickCount64());
     const AdsEntryPose::Pose absolute{ d.dpitch, d.dyaw, d.droll, d.ox, d.oy, d.oz };
     const AdsEntryPose::Pose relative = g_adsEntry.Relative(d.aiming, live, absolute);
-
-    // The lean rides the same fade as the rotation rather than being cut at the
-    // edge: the sights sit on the muzzle line, so an eye offset from it moves the
-    // sight picture off the target, and cutting it in one frame is the jolt the
-    // fade exists to remove.
-    if (d.adsMode == AdsMode::Paused) {
-        d.dpitch *= scale;
-        d.dyaw   *= scale;
-        d.droll  *= scale;
-        d.ox     *= scale;
-        d.oy     *= scale;
-        d.oz     *= scale;
-    } else {
-        const float rest = 1.0f - scale;
-        d.dpitch = d.dpitch * scale + relative.pitch * rest;
-        d.dyaw   = d.dyaw   * scale + relative.yaw   * rest;
-        d.droll  = d.droll  * scale + relative.roll  * rest;
-        d.ox     = d.ox     * scale + relative.x     * rest;
-        d.oy     = d.oy     * scale + relative.y     * rest;
-        d.oz     = d.oz     * scale + relative.z     * rest;
-    }
+    const AdsEntryPose::Pose blended = BlendAdsPose(d.adsMode, scale, absolute, relative);
+    d.dpitch = blended.pitch;
+    d.dyaw   = blended.yaw;
+    d.droll  = blended.roll;
+    d.ox     = blended.x;
+    d.oy     = blended.y;
+    d.oz     = blended.z;
 
     // Which of the two yaw compositions the write uses is read here, once per
     // frame: the hotkey thread can flip it at any moment, and re-reading it per
@@ -693,9 +685,10 @@ FrameDelta TakeFrame() {
 // touching the structs rather than writing an identity: ApplyToView is not the
 // identity even at zero, because it rebuilds the view matrix and the
 // view-projection from the decoded camera rather than leaving them. Skipping the
-// write is what makes an aimed frame bit-for-bit the frame the game would have
-// drawn on its own, which is the whole promise of handing the view back to the
-// gun.
+// write is what makes a suspended frame the frame the game would have drawn on
+// its own, which is the whole promise of handing the view back to the gun - and
+// with the sights up in `paused` the only delta left is the head tilt, so a head
+// held level takes that path every frame.
 void ApplyRenderViews(void* self, const FrameDelta& d, float bodyYaw, AimBasis& mainBasis) {
     void* main = MainView(self);
     void* world = WorldView(self);
@@ -784,6 +777,8 @@ void ApplyTracking(void* self) {
     // "not aiming", which is the safe direction: it fails toward stock.
     const bool aiming = delta.aiming;
     AimBasis mainBasis;
+    FrameCameras cameras;
+    bool haveCameras = false;
     if (delta.tracking && !delta.Idle()) {
         ApplyRenderViews(self, delta, CleanViewAngles()[1], mainBasis);
         // The aim is not recoverable from the camera any more: the view these
@@ -796,7 +791,25 @@ void ApplyTracking(void* self) {
         float cleanFwd[3], cleanRight[3], cleanUp[3];
         AngleVectors(CleanViewAngles(), cleanFwd, cleanRight, cleanUp);
         for (int i = 0; i < 3; ++i) mainBasis.aim[i] = cleanFwd[i];
+
+        // The same two cameras the HUD's world-anchored marks need. The game
+        // places those through its own world-to-screen, which projects with the
+        // clean camera and leaves them sitting still on the glass while the world
+        // turns; giving it both cameras lets the world point be moved into the
+        // one it is projecting with (world_marker_hook.h).
+        for (int i = 0; i < 3; ++i) {
+            cameras.cleanEye[i]   = mainBasis.shotEye[i];
+            cameras.cleanFwd[i]   = cleanFwd[i];
+            cameras.cleanRight[i] = cleanRight[i];
+            cameras.cleanUp[i]    = cleanUp[i];
+            cameras.drawnEye[i]   = mainBasis.renderEye[i];
+            cameras.drawnFwd[i]   = mainBasis.fwd[i];
+            cameras.drawnRight[i] = mainBasis.right[i];
+            cameras.drawnUp[i]    = mainBasis.up[i];
+        }
+        haveCameras = mainBasis.valid;
     }
+    PublishFrameCameras(haveCameras ? &cameras : nullptr);
 
     // Where the gun is pointing in the picture that was just built. ONE
     // projection, two consumers - never a second formula for the ADS case, which
@@ -808,9 +821,12 @@ void ApplyTracking(void* self) {
     // the sight line.
     //
     // Nothing is placed in `paused`: the view has settled back onto the aim, so
-    // the game's own sight picture is the truth again. An idle delta leaves the
-    // aim at the centre of the frame by construction, which is where the
-    // zero-initialised offset puts it.
+    // the game's own sight picture is the truth again, and the centre of the
+    // frame is where the aim is - which is where the zero-initialised offset
+    // leaves it. The head tilt that survives the fade there does not change that:
+    // a pure roll leaves the camera's forward vector where it was, so the aim
+    // point stays at the centre and the crosshair the game draws there is still
+    // marking it.
     const bool adsTracked = aiming && delta.adsMode != AdsMode::Paused;
     const bool haveAim = delta.tracking && (!aiming || adsTracked);
     float ndcX = 0.0f, ndcY = 0.0f;
@@ -893,13 +909,19 @@ void Hook_RenderView(void* self, void* view, int clearFlags, int whatToDraw) {
     g_originalRenderView(self, view, clearFlags, whatToDraw);
 }
 
-}  // namespace
+// Set when a hook that runs EARLIER in the frame than the view build has already
+// decided this frame's pose. The view build clears it the moment it uses it, so
+// it lives for exactly the span between the two calls and cannot latch on: a
+// frame whose view build never runs costs one stale frame, not a pose that never
+// moves again.
+bool g_frameOpened = false;
 
-// Runs from the render-phase hook, upstream of everything this file draws. It is
-// the only place a tracker sample is taken, so the pose the world is CULLED to
-// and the pose it is DRAWN with are the same pose by construction rather than by
-// two reads happening to agree.
-FrameRotation BeginFrame() {
+// The frame's pose, decided once: a tracker sample through the campaign gate,
+// the tracking-loss fade and the ADS fade. Everything the frame does with the
+// head - the culling frustum, the render views, the skybox, the cockpit - comes
+// from this one answer, because two samples of a live tracker are two different
+// poses and the frame would then be culled to one and drawn to the other.
+FrameRotation DecideFrame() {
     Plugin& plugin = GetPlugin();
     plugin.Update();
 
@@ -914,6 +936,33 @@ FrameRotation BeginFrame() {
     r.droll = g_frame.droll;
     g_lastRotation = r;
     return r;
+}
+
+}  // namespace
+
+// Runs from the Titan cockpit hook, which is the earliest thing in the frame
+// that needs the pose: the cockpit is placed at SetUpView + 0x247 and the
+// frame's camera is built at SetUpView + 0x9fc. Decides the pose and marks the
+// frame as decided, so the view build below reuses it instead of sampling again.
+FrameRotation OpenFrame() {
+    const FrameRotation r = DecideFrame();
+    g_frameOpened = true;
+    return r;
+}
+
+// Runs from the render-phase hook, upstream of everything this file draws.
+FrameRotation BeginFrame() {
+    if (g_frameOpened) {
+        // The Titan cockpit was placed earlier in this same SetUpView call and
+        // has already decided the pose. Reuse it rather than sampling the
+        // tracker again: the cockpit is held still in the picture by the camera
+        // turning by exactly what the cockpit turned by, and two samples of a
+        // live tracker are two different poses - which is a cockpit that swims
+        // against the frame whenever the head moves.
+        g_frameOpened = false;
+        return g_lastRotation;
+    }
+    return DecideFrame();
 }
 
 FrameRotation LastFrameRotation() { return g_lastRotation; }

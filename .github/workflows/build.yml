@@ -53,41 +53,11 @@ jobs:
         shell: pwsh
         run: pixi run package
 
-      - name: Stage installer contents for artifact upload
+      - name: Verify installer was produced
         shell: pwsh
         run: |
-          Write-Host "Staging installer contents..." -ForegroundColor Cyan
-
           $zip = Get-ChildItem -Path release -Filter "Titanfall2HeadTracking-*-installer.zip" | Select-Object -First 1
           if (-not $zip) {
             Write-Host "::error::No installer ZIP found under release/"
             exit 1
           }
-
-          $contentsDir = "release/artifact-contents"
-          if (Test-Path $contentsDir) {
-            Remove-Item -Recurse -Force $contentsDir
-          }
-          New-Item -ItemType Directory -Path $contentsDir -Force | Out-Null
-
-          Expand-Archive -Path $zip.FullName -DestinationPath $contentsDir -Force
-          Write-Host "Staged $($zip.Name) to $contentsDir" -ForegroundColor Green
-
-      - name: Compute artifact name from ref
-        id: artifact_name
-        shell: pwsh
-        run: |
-          $branch = if ($env:GITHUB_HEAD_REF) { $env:GITHUB_HEAD_REF } else { $env:GITHUB_REF_NAME }
-          $sanitized = $branch -replace '[^A-Za-z0-9._-]', '-'
-          $name = "Titanfall2HeadTracking-$sanitized"
-          echo "name=$name" >> $env:GITHUB_OUTPUT
-          Write-Host "Artifact name: $name"
-
-      - name: Upload installer artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: ${{ steps.artifact_name.outputs.name }}
-          path: release/artifact-contents/
-          retention-days: 14
-          if-no-files-found: error
-          overwrite: true

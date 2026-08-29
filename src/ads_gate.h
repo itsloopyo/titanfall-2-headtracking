@@ -16,8 +16,10 @@ enum class TrackingVerdict {
     Active,
     // The sights are up in `paused` mode. The pose is still fed to the camera,
     // because it is being EASED off rather than switched off - see AdsFade - and
-    // once it has gone the frame is bit-for-bit the frame the game would have
-    // drawn on its own.
+    // once it has gone the frame is the frame the game would have drawn on its
+    // own, bar the head tilt: roll is left out of the fade in every mode, since
+    // it moves neither the eye off the barrel nor the aim off the middle of the
+    // frame (ads_blend.h).
     AdsSuspended,
     NoLevel,
     Loading,

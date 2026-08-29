@@ -3,6 +3,14 @@
 ## [Unreleased]
 
 ### Added
+- Added Titan cockpit tracking: the cockpit now turns with your head instead of
+  standing still while the view sweeps across the inside of it. It is a
+  viewmodel, so the game placed it from the clean view angles like a pilot's
+  weapon - right for a gun you look away from, useless for a shell that wraps
+  you. The head rotation is composed onto `C_Titan_Cockpit::CalcView`, so you
+  look through the cockpit rather than around it. The positional lean is left
+  off it deliberately, so leaning still gives parallax against the canopy. Aim
+  is untouched: the game's own view angles never see any of this.
 - Added a single previous log generation: the launch before the current one is
   kept as `Titanfall2HeadTracking.prev.log`. The fault handler asks the user to
   send the log, and relaunching to go find it used to truncate away the crash
@@ -27,7 +35,10 @@
   eases the head delta out over 150 ms, so the frame settles onto the aim -
   which is where the crosshair already was - and both the head rotation and the
   positional lean stay off until the sights come down, when tracking eases back
-  in over 250 ms. The player's aim is never touched. Aiming is read from the
+  in over 250 ms. Head TILT is the exception and keeps working throughout, in
+  every ADS mode: a tilt moves neither your eye off the barrel nor the aim off
+  the middle of the screen, so levelling it on every aim would be two horizon
+  jolts for nothing. The player's aim is never touched. Aiming is read from the
   game's own sights flag rather than from a zoom factor, so it is detected on
   weapons that have sights but no magnification - which is most of them, and
   where a moving eye position makes the sights unusable.

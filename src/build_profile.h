@@ -73,6 +73,15 @@ struct OffsetTable {
     // hides the lot. Set to 1 only when the head has turned so far that the gun
     // is behind the picture and there is nowhere honest to draw the crosshair.
     uint32_t crosshair_state;
+    // The client's world-position-to-screen-pixels,
+    // WorldToScreen(int* x, int* y, const Vector& world, int w, int h, int offX,
+    // int offY). Every world-anchored HUD mark is placed through it - the
+    // screen-indicator ellipse placement and the GetEntScreenSpaceBounds script
+    // native above it - and it projects with the camera the game thinks it is
+    // drawing, which is the clean one. Hooked to move the world point into that
+    // camera's frame first, so the marks stay on the world (world_marker_hook.h).
+    // Zero leaves every HUD mark where the game puts it.
+    uint32_t world_to_screen_rva;
     // The client's world trace, and the two fields of the trace_t it fills that
     // the mod reads. Used to find how far away what the gun is pointing at is,
     // so the crosshair can be projected as a POINT and stays on target when a
@@ -81,6 +90,11 @@ struct OffsetTable {
     uint32_t trace_line_rva;
     uint32_t trace_endpos;
     uint32_t trace_fraction;
+    // C_Titan_Cockpit::CalcView(this, Vector* origin, QAngle* angles): the
+    // cockpit's own transform, and the one place the Titan cockpit can be turned
+    // with the head so the player looks THROUGH it rather than around the inside
+    // of it (cockpit_hook.h). Zero leaves Titan cockpits alone.
+    uint32_t cockpit_calc_view_rva;
     // ICvar*, the byte offset of FindVar within its vtable, and the offset of a
     // ConVar's float value. Used to hold cl_fovScale wider than the field of view
     // being drawn, so the engine stops culling what the head can turn to look at,

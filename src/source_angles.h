@@ -1,10 +1,12 @@
 #pragma once
 
-// Source QAngle maths, shared by the two places the head delta meets the
+// Source QAngle maths, shared by the three places the head delta meets the
 // engine's camera: the view-angle hook, which composes it onto the angles
-// SetUpView asks for, and the render hook, which recomposes a render view's
-// basis after leaning its origin. Both have to agree on the conventions below
-// or the two would encode the same pose differently.
+// SetUpView asks for; the render hook, which recomposes a render view's basis
+// after leaning its origin; and the Titan cockpit hook, which carries the same
+// rotation onto the cockpit so it stays where it was in the picture. All three
+// have to agree on the conventions below or they would encode the same pose
+// differently.
 
 #include <cmath>
 
@@ -94,6 +96,55 @@ inline void ApplyCameraLocalRotation(float* ang, float dpitch, float dyaw, float
         outUp[i]    = hu[0] * fwd[i] + hu[1] * camLeft[i] + hu[2] * up[i];
         outLeft[i]  = -outRight[i];
     }
+    BasisToAngles(outFwd, outLeft, outUp, ang);
+}
+
+// Rotates a QAngle by the rotation the head delta put into the CAMERA.
+//
+// The Titan cockpit is not the camera. The game draws it at a fraction of the
+// player's pitch (`cockpit_pitch_up_frac` / `_down_frac`) and subtracts its own
+// drift, so it sits a few degrees away from the view and cannot simply be
+// handed the same delta. What holds it still in the picture is the rotation
+// that carried the CLEAN camera onto the DRAWN one, applied on the left: if the
+// camera goes from C to D, a cockpit at K has to go to (D C^-1) K for the two
+// to end up in the relative orientation they started in - which is what "the
+// cockpit stays where it was on screen" means.
+//
+// Composing the delta onto the cockpit's own angles instead, with the same call
+// the camera gets, is a right-multiply - K D - and the two agree only while K
+// equals C. They part company by exactly the pitch the cockpit has been held
+// back by, which is the case this exists for.
+//
+// Composition-agnostic by construction: it reads the camera's before and after
+// rather than the delta, so world-space and camera-local yaw need no branch
+// here and cannot encode the head pose differently from the view hook.
+inline void CarryRotation(const float* cleanAng, const float* drawnAng, float* ang) {
+    float cf[3], cr[3], cu[3];
+    float df[3], dr[3], du[3];
+    float f[3], r[3], u[3];
+    AngleVectors(cleanAng, cf, cr, cu);
+    AngleVectors(drawnAng, df, dr, du);
+    AngleVectors(ang, f, r, u);
+
+    // The clean basis is orthonormal, so resolving a world vector in it is three
+    // dot products, and reading those coordinates back out in the drawn basis
+    // is the same rotation the camera underwent.
+    struct Carry {
+        const float *cf, *cr, *cu, *df, *dr, *du;
+        void operator()(const float v[3], float out[3]) const {
+            const float a = v[0] * cf[0] + v[1] * cf[1] + v[2] * cf[2];
+            const float b = v[0] * cr[0] + v[1] * cr[1] + v[2] * cr[2];
+            const float c = v[0] * cu[0] + v[1] * cu[1] + v[2] * cu[2];
+            for (int i = 0; i < 3; ++i) out[i] = a * df[i] + b * dr[i] + c * du[i];
+        }
+    } carry{ cf, cr, cu, df, dr, du };
+
+    float outFwd[3], outRight[3], outUp[3];
+    carry(f, outFwd);
+    carry(r, outRight);
+    carry(u, outUp);
+
+    const float outLeft[3] = { -outRight[0], -outRight[1], -outRight[2] };
     BasisToAngles(outFwd, outLeft, outUp, ang);
 }
 

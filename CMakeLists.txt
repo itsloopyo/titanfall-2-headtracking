@@ -53,9 +53,11 @@ add_library(Titanfall2HeadTracking SHARED
     src/hotkey_handler.cpp
     src/camera_hook.cpp
     src/view_angles_hook.cpp
+    src/cockpit_hook.cpp
     src/fov_control.cpp
     src/crosshair_hook.cpp
     src/hit_indicator.cpp
+    src/world_marker_hook.cpp
     src/ads_state.cpp
     src/ads_marker.cpp
     src/aim_trace.cpp

@@ -59,8 +59,6 @@ For placing the files by hand:
 
 ### VR Headset Setup
 
-A headset here is a head tracker and nothing else. There is no VR rendering and no stereo; Titanfall 2 draws to your monitor exactly as it always did, and you play it on the monitor.
-
 1. Connect the headset to the PC with Air Link, Virtual Desktop, or a cable link.
 2. Launch SteamVR and confirm the headset is tracking.
 3. In OpenTrack, set **Input** to `SteamVR`, then Start.
@@ -74,7 +72,7 @@ A headset here is a head tracker and nothing else. There is no VR rendering and 
 
 ### Phone App Setup
 
-Phone trackers all speak the same OpenTrack UDP protocol and the mod cannot tell one from another. What decides how you wire yours up is how much filtering the app does before the packet leaves the phone.
+The mod takes the OpenTrack UDP protocol on port `4242` and nothing else, so a phone app works here if it can send that protocol, either itself or through a companion app on the PC. For one that can, what decides how you wire it up is how much filtering it does before the packet leaves the phone.
 
 - **Send directly to port `4242`** when the app filters its own signal on the device: point it at this PC's IP address, UDP port `4242`, using the OpenTrack packet format. A raw or lightly filtered feed sent straight here will jitter, because the mod's smoothing is sized to take the edge off a clean signal rather than to rescue a noisy one. I made [Headcam](https://headcam.app) so that decent tracking was free for anybody with a phone already in their pocket, and it filters on-device, so it can send direct. Any other app that filters enough noise works exactly the same way.
 - **Relay through OpenTrack** when the app sends a raw feed, or when you want OpenTrack's curve mapping: set OpenTrack's **Input** to `UDP over network` on a different port, have the phone send to that port, and leave OpenTrack's **Output** on `127.0.0.1:4242`. OpenTrack's filters clean the feed up before it reaches the game.
@@ -111,8 +109,11 @@ reticle was marking, so your shot lands where you had it lined up - and they
 differ in what happens for the rest of the aim:
 
 1. **Tracking paused** (default) - the game keeps the camera for as long as the
-   sights are up. The sight picture is exactly the game's, and head movement
-   does nothing until you lower the weapon.
+   sights are up. The sight picture is exactly the game's, and turning or leaning
+   your head does nothing until you lower the weapon. Tilting it still rolls the
+   view, in this mode and the other two: a tilt does not move your eye off the
+   barrel or the aim off the middle of the screen, so there is nothing to hand
+   back to the gun.
 2. **Tracking on, with an aim marker** - head tracking carries on from the
    snapped position, and a small white crosshair is drawn wherever your rounds
    will actually land. This white marker is authoritative, including with scoped
@@ -207,6 +208,9 @@ MoveCrosshair=1
 ;   paused  = tracking stands down until you lower the weapon (default)
 ;   marker  = tracking stays live and a white cross marks where rounds land
 ;   tracked = tracking stays live with nothing drawn
+; A head TILT rolls the view in all three: it moves neither your eye off the
+; barrel nor the aim off the middle of the screen, so there is nothing to
+; hand back to the gun.
 AdsMode=paused
 
 [Debug]

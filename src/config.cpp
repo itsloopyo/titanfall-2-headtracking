@@ -185,6 +185,9 @@ void Config::WriteDefault(const std::string& path) {
     w.WriteComment("   paused  = tracking stands down until you lower the weapon (default)");
     w.WriteComment("   marker  = tracking stays live and a white cross marks where rounds land");
     w.WriteComment("   tracked = tracking stays live with nothing drawn");
+    w.WriteComment(" A head TILT rolls the view in all three: it moves neither your eye off the");
+    w.WriteComment(" barrel nor the aim off the middle of the screen, so there is nothing to");
+    w.WriteComment(" hand back to the gun.");
     w.WriteString("AdsMode", AdsModeValue(defaults::kAdsMode));
     w.WriteBlankLine();
     w.WriteSection("Debug");

@@ -15,6 +15,13 @@ namespace headtracking {
 // sliver of missing world down whichever edge the head was moving towards.
 FrameRotation BeginFrame();
 
+// The same decision, taken from the Titan cockpit hook instead. That hook runs
+// EARLIER in the frame than the view build - the cockpit is placed at SetUpView
+// + 0x247, the camera is built at + 0x9fc - so when there is a cockpit it is the
+// first thing in the frame that needs the pose, and BeginFrame above then reuses
+// what this decided rather than taking a second sample.
+FrameRotation OpenFrame();
+
 // The rotation BeginFrame last decided, for the second view of the same frame -
 // the 3D skybox is built from its own origin but has to take the head pose the
 // world took, or the sky and the ground disagree about where the player looked.

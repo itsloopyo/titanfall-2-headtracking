@@ -10,9 +10,11 @@
 #include "game_state.h"
 #include "hotkey_handler.h"
 #include "ads_state.h"
+#include "cockpit_hook.h"
 #include "crosshair_hook.h"
 #include "debug_log.h"
 #include "hit_indicator.h"
+#include "world_marker_hook.h"
 
 namespace headtracking {
 
@@ -156,6 +158,18 @@ void Plugin::Initialize() {
                    "puts it into the angles the frame is built from. The mod will lean but not "
                    "turn. Please report this log.");
         }
+        // Titans only. Without it the cockpit stays put in the world while the
+        // view turns inside it, so head tracking in a Titan looks around the
+        // inside of the cockpit instead of through it (cockpit_hook.h). A
+        // failure here costs Titan sections and nothing else, so it does not
+        // gate the rest.
+        InstallCockpitHook();
+        // The HUD's world-anchored marks - the BT-7274 marker, objective
+        // waypoints - are placed by the game's own world-to-screen, which
+        // projects with the clean camera and so pins them to the glass while the
+        // world turns under them (world_marker_hook.h). A failure here costs
+        // those marks and nothing else.
+        InstallWorldMarkerHook();
         GetFovControl().Initialize(m_config.fov_override_degrees, m_config.cull_fov_scale);
         InstallAdsStateHook();
         if (m_config.move_crosshair) {

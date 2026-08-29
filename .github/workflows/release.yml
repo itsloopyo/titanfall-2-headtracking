@@ -90,6 +90,11 @@ jobs:
 
       - name: Setup pixi
         uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
+        with:
+          # No conda dependencies in this workspace, so setup-pixi's install
+          # flow ends in a `pixi list` that exits 1 on the empty environment.
+          # See build.yml for the full note.
+          run-install: false
 
       # Characterization tests for the camera maths, before anything is cut.
       - name: Run tests

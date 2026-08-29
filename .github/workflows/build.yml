@@ -36,8 +36,19 @@ jobs:
       - name: Setup Visual Studio environment
         uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # v3
 
+      # run-install: false because this workspace has NO conda dependencies -
+      # pixi is the task runner that keeps CI and a developer on the same build
+      # command, and nothing is fetched from a channel. setup-pixi's install
+      # flow ends in `pixi list`, which exits 1 on an empty environment ("No
+      # packages found in 'default' environment for 'win-64' platform"), so
+      # letting it run fails the job before a single build step. There is no
+      # input to skip just the listing. `pixi run` creates the environment on
+      # demand anyway, so skipping the install costs nothing and caches nothing
+      # that was ever worth caching.
       - name: Setup pixi
         uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
+        with:
+          run-install: false
 
       # Characterization tests for the camera maths. Ahead of packaging so a
       # regression in the arithmetic every rendered frame passes through fails

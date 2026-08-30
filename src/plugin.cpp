@@ -59,7 +59,12 @@ void ApplyPositionConfig(cameraunlock::PositionProcessor& processor, const Confi
     ps.invert_y = c.pos_invert_y;
     ps.invert_z = c.pos_invert_z;
     ps.limit_x = c.pos_limit_x;
+    // The clamp is [-limit_y_down, +limit_y] and limit_y_down carries its own
+    // default, so mirror the one configured vertical limit the way
+    // PositionSettings::Symmetric does. Left unset, raising LimitY widened the
+    // upward budget only and downward travel stayed pinned at 0.20m.
     ps.limit_y = c.pos_limit_y;
+    ps.limit_y_down = c.pos_limit_y;
     // The two cores disagree about which sign of z is "forward". C++ clamps
     // z to [-limit_z, +limit_z_back]; the C# original it is a port of clamps to
     // [-LimitZBack, +LimitZ]. Transposed, not mirrored - with the same settings

@@ -3,6 +3,9 @@
 #include <cstdint>
 #include <string>
 
+#include "cameraunlock/data/position_settings.h"
+#include "cameraunlock/math/smoothing_utils.h"
+
 #include "ads.h"
 
 namespace headtracking {
@@ -24,8 +27,8 @@ constexpr bool kEnableOnStartup = true;
 constexpr float kSensitivity = 1.0f;
 constexpr bool kInvert = false;
 
-constexpr float kLocalSmoothing = 0.0f;
-constexpr float kRemoteSmoothing = 0.15f;
+constexpr float kLocalSmoothing = static_cast<float>(cameraunlock::math::kDefaultLocalSmoothing);
+constexpr float kRemoteSmoothing = static_cast<float>(cameraunlock::math::kDefaultRemoteSmoothing);
 
 constexpr float kDeadzone = 0.0f;
 
@@ -41,10 +44,10 @@ constexpr float kPositionSensitivity = 1.0f;
 constexpr bool kPositionInvertX = true;
 constexpr bool kPositionInvertY = false;
 constexpr bool kPositionInvertZ = true;
-constexpr float kLimitX = 0.30f;
-constexpr float kLimitY = 0.20f;
-constexpr float kLimitZ = 0.40f;
-constexpr float kLimitZBack = 0.10f;
+constexpr float kLimitX = cameraunlock::PositionSettings{}.limit_x;
+constexpr float kLimitY = cameraunlock::PositionSettings{}.limit_y;
+constexpr float kLimitZ = cameraunlock::PositionSettings{}.limit_z;
+constexpr float kLimitZBack = cameraunlock::PositionSettings{}.limit_z_back;
 // Source units per metre. 1 unit = 1 inch, so 39.37 is 1:1 with real-world
 // head movement.
 constexpr float kWorldScale = 39.37f;

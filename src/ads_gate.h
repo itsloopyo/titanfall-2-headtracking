@@ -19,7 +19,7 @@ enum class TrackingVerdict {
     // once it has gone the frame is the frame the game would have drawn on its
     // own, bar the head tilt: roll is left out of the fade in every mode, since
     // it moves neither the eye off the barrel nor the aim off the middle of the
-    // frame (ads_blend.h).
+    // frame (cameraunlock/ads/ads_blend.h).
     AdsSuspended,
     NoLevel,
     Loading,
@@ -57,8 +57,8 @@ inline TrackingState DecideTracking(SessionKind session, bool haveRotation, bool
         return s;
     }
     s.aiming = aiming;
-    s.verdict = (aiming && mode == AdsMode::Paused) ? TrackingVerdict::AdsSuspended
-                                                    : TrackingVerdict::Active;
+    s.verdict = (aiming && AdsSuspendsTracking(mode)) ? TrackingVerdict::AdsSuspended
+                                                      : TrackingVerdict::Active;
     return s;
 }
 

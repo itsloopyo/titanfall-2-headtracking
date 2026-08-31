@@ -21,10 +21,8 @@
 #include <limits>
 
 #include "ads.h"
-#include "ads_blend.h"
 #include "ads_gate.h"
-#include "aim_projection.h"
-#include "marker_projection.h"
+#include "projection.h"
 #include "rui_transform.h"
 #include "angle_units.h"
 #include "config.h"
@@ -557,7 +555,7 @@ void TestGuardsAgreeAcrossTheAcceptedBand() {
     }
 }
 
-// ---- aim_projection --------------------------------------------------------
+// ---- aim projection (cameraunlock/rendering/aim_ndc_projection.h) -----------
 //
 // Where the gun points in the picture the head is looking at. The reticle is
 // drawn at whatever this returns, so a sign error here puts the mark on the
@@ -693,7 +691,7 @@ void TestAimBehindTheViewIsRejected() {
     CHECK(!ProjectAimToNdc(aim, fwd, right, up, 0.934f, 0.525f, x, y));
 }
 
-// ---- marker_projection -----------------------------------------------------
+// ---- world reprojection (cameraunlock/rendering/world_reprojection.h) -------
 //
 // The world-anchored HUD marks are placed by the GAME's world-to-screen, which
 // projects with the clean camera. The mod moves the world point instead of the
@@ -798,7 +796,7 @@ void TestMarkerKeepsItsDistance() {
     CHECK_NEAR(std::sqrt(after), std::sqrt(before), 1e-2f);
 }
 
-// ---- ads_pose --------------------------------------------------------------
+// ---- ads entry pose (cameraunlock/ads/entry_pose.h) ------------------------
 //
 // The entry pose is what makes the tracked ADS modes swing onto the aim and then
 // keep tracking from there, and it is the one piece of the shared ADS module the
@@ -930,7 +928,7 @@ void TestAdsPoseLoweringTheWeaponDropsTheEntry() {
     CHECK_NEAR(again.yaw, 0.0f, 1e-6f);
 }
 
-// ---- ads_blend -------------------------------------------------------------
+// ---- ads blend (cameraunlock/ads/ads_blend.h) ------------------------------
 //
 // What the ADS fade does to the frame's pose. The one rule that is not obvious
 // from either end of it is that ROLL is not in the fade at all: a head tilt

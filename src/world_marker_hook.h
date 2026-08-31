@@ -1,6 +1,6 @@
 #pragma once
 
-#include "marker_projection.h"
+#include "projection.h"
 
 namespace headtracking {
 
@@ -35,7 +35,7 @@ namespace headtracking {
 //
 // The mark is not moved after the fact. The world point is moved BEFORE the game
 // projects it, out of the frame the picture was drawn in and into the frame the
-// game is projecting with (marker_projection.h). The game's own projection then
+// game is projecting with (cameraunlock/rendering/world_reprojection.h). The game's own projection then
 // produces the head-tracked answer, and the off-screen ellipse clamp and the
 // behind-the-camera test that read that answer come along with it.
 //

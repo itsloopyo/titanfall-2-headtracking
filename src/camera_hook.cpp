@@ -49,11 +49,10 @@
 
 #include "cameraunlock/hooks/hook_manager.h"
 #include "ads.h"
-#include "ads_blend.h"
 #include "ads_gate.h"
 #include "ads_marker.h"
 #include "ads_state.h"
-#include "aim_projection.h"
+#include "projection.h"
 #include "aim_trace.h"
 #include "angle_units.h"
 #include "build_profile.h"
@@ -349,7 +348,7 @@ bool ViewBelongsToThis(void* self, void* view) {
 // What the frame was drawn along, and where the gun was pointing while it was.
 // Filled from the vectors ApplyToView actually wrote, so the reticle projection
 // cannot encode the head composition differently from the camera - see
-// aim_projection.h.
+// cameraunlock/rendering/aim_ndc_projection.h.
 struct AimBasis {
     bool valid = false;
     float aim[3];                      // the clean camera's forward: the aim

@@ -6,6 +6,7 @@ channels = ["conda-forge"]
 platforms = ["win-64"]
 
 [tasks]
+update-submodule = "git submodule update --remote cameraunlock-core && powershell -NoProfile -ExecutionPolicy Bypass -File cameraunlock-core/scripts/update-submodule.ps1"
 # Fetch cameraunlock-core on a fresh clone AND fast-forward it to origin/main.
 # Deliberate dev action with a commit attached - nothing depends on it, and
 # release.ps1's clean-tree precondition catches a stray bump before a tag.

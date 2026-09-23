@@ -109,10 +109,6 @@ void Plugin::Initialize() {
     m_worldScale = m_config.pos_world_scale;
     m_enabled.store(m_config.enabled_on_startup);
     m_worldSpaceYaw.store(m_config.world_space_yaw);
-    // The player's choice, and never reset by start-up logic: whatever the file
-    // says is what they set, from this key or from the in-game cycle.
-    m_adsMode.store(m_config.ads_mode);
-    HT_LOG("[ads] %s", AdsModeToast(m_config.ads_mode));
     m_session.SetMode(m_config.pos_enabled
                           ? cameraunlock::TrackingMode::RotationAndPosition
                           : cameraunlock::TrackingMode::RotationOnly);
@@ -187,7 +183,7 @@ void Plugin::Initialize() {
 
     m_hotkeys = std::make_unique<HotkeyHandler>();
     m_hotkeys->Start(*this, m_config.toggle_vk, m_config.yaw_mode_vk,
-                     m_config.mode_cycle_vk, m_config.ads_mode_vk);
+                     m_config.mode_cycle_vk);
     HT_LOG("[plugin] initialized");
 }
 
@@ -195,18 +191,6 @@ void Plugin::Initialize() {
 // Update() on the render thread. See plugin.h.
 void Plugin::CycleTrackingMode() {
     m_modeCycleRequested.store(true, std::memory_order_release);
-}
-
-// Advances the cycle, writes the choice back to the INI so it survives a
-// restart, and says which mode it landed on. Safe to run straight off the hotkey
-// thread, like the yaw mode and unlike the tracking-mode cycle: it reaches
-// nothing the render thread is mid-way through, and the store is what the next
-// frame's verdict is recomputed from.
-void Plugin::CycleAdsMode() {
-    const AdsMode next = NextAdsMode(m_adsMode.load(std::memory_order_acquire));
-    m_adsMode.store(next, std::memory_order_release);
-    Config::SaveAdsMode(next);
-    HT_LOG("[ads] %s", AdsModeToast(next));
 }
 
 // Yaw mode is a plain atomic the render thread reads once per frame, so the

@@ -11,11 +11,10 @@ namespace headtracking {
 
 namespace {
 // Ctrl+Shift chord letters per the shared T/Y/U/G/H/J cluster convention:
-// Y = toggle tracking, G = mode cycle, H = yaw mode, U = ADS mode.
+// Y = toggle tracking, G = mode cycle, H = yaw mode.
 constexpr int kVkY = 0x59;
 constexpr int kVkG = 0x47;
 constexpr int kVkH = 0x48;
-constexpr int kVkU = 0x55;
 
 // The poller reads global key state, so without this every hotkey also fires
 // while the player is alt-tabbed. Both key sets collide with everyday shortcuts
@@ -35,7 +34,7 @@ std::function<void()> FocusGuarded(F action) {
 }  // namespace
 
 void HotkeyHandler::Start(Plugin& plugin, int toggle_vk, int yaw_mode_vk,
-                          int mode_cycle_vk, int ads_mode_vk) {
+                          int mode_cycle_vk) {
     using cameraunlock::input::ChordGuarded;
     using cameraunlock::input::NavGuarded;
 
@@ -48,17 +47,14 @@ void HotkeyHandler::Start(Plugin& plugin, int toggle_vk, int yaw_mode_vk,
         HT_LOG("[hotkey] toggle -> %s", plugin.IsEnabled() ? "on" : "off");
     };
     const auto yawMode = [&plugin]() { plugin.ToggleYawMode(); };
-    const auto adsMode = [&plugin]() { plugin.CycleAdsMode(); };
 
     m_poller.SetToggleKey(toggle_vk, FocusGuarded(NavGuarded(toggle)));
     m_poller.AddHotkey(yaw_mode_vk, FocusGuarded(NavGuarded(yawMode)));
     m_poller.AddHotkey(mode_cycle_vk, FocusGuarded(NavGuarded(modeCycle)));
-    m_poller.AddHotkey(ads_mode_vk, FocusGuarded(NavGuarded(adsMode)));
 
     m_poller.AddHotkey(kVkY, FocusGuarded(ChordGuarded(toggle)));
     m_poller.AddHotkey(kVkH, FocusGuarded(ChordGuarded(yawMode)));
     m_poller.AddHotkey(kVkG, FocusGuarded(ChordGuarded(modeCycle)));
-    m_poller.AddHotkey(kVkU, FocusGuarded(ChordGuarded(adsMode)));
 
     m_poller.Start(16);
 }

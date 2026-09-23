@@ -33,15 +33,6 @@ public:
     void CycleTrackingMode();
     const char* TrackingModeName() const;
 
-    // What head tracking does while the sights are up. Read once per frame by
-    // the render thread, written by the hotkey thread - an atomic rather than a
-    // deferred request because nothing downstream of it is stateful, so the very
-    // next frame recomputes its whole verdict from the new value. That is what
-    // makes a mode cycled mid-aim take effect on THAT aim rather than the next
-    // one: there is no cached verdict for it to ride.
-    AdsMode GetAdsMode() const { return m_adsMode.load(std::memory_order_acquire); }
-    void CycleAdsMode();
-
 
     // Pulls the latest UDP packet, runs it through the session and updates the
     // cached rotation (radians) + position offset (Source world units). Called
@@ -80,7 +71,6 @@ private:
     Config m_config;
     std::atomic<bool> m_enabled{false};
     std::atomic<bool> m_worldSpaceYaw{true};
-    std::atomic<AdsMode> m_adsMode{kDefaultAdsMode};
 
     // Hotkeys run on their own poller thread, and CycleTrackingMode() reaches
     // deep into the session: it resets position smoothing. Doing that while the

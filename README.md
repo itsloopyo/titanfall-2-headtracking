@@ -120,7 +120,6 @@ Two equivalent binding sets, use whichever your keyboard has:
 | Toggle tracking     | `End`       | `Ctrl+Shift+Y`  |
 | Cycle tracking mode | `Page Up`   | `Ctrl+Shift+G`  |
 | Toggle yaw mode     | `Page Down` | `Ctrl+Shift+H`  |
-| Cycle ADS mode      | `Insert`    | `Ctrl+Shift+U`  |
 
 Centre in your tracker app once you are seated normally: OpenTrack's Center bind, the CENTER button in Headcam, or SteamVR's reset.
 
@@ -133,28 +132,13 @@ Centre in your tracker app once you are seated normally: OpenTrack's Center bind
 
 `Page Down` / `Ctrl+Shift+H` switches yaw between world-space (horizon-locked) and camera-local.
 
-`Insert` / `Ctrl+Shift+U` cycles what happens when you aim down sights. All
-three start the same way - raising the sights swings the view onto the point the
-reticle was marking, so your shot lands where you had it lined up - and they
-differ in what happens for the rest of the aim:
+### Aiming down sights
 
-1. **Tracking paused** (default) - the game keeps the camera for as long as the
-   sights are up. The sight picture is exactly the game's, and turning or leaning
-   your head does nothing until you lower the weapon. Tilting it still rolls the
-   view, in this mode and the other two: a tilt does not move your eye off the
-   barrel or the aim off the middle of the screen, so there is nothing to hand
-   back to the gun.
-2. **Tracking on, with an aim marker** - head tracking carries on from the
-   snapped position, and a small white crosshair is drawn wherever your rounds
-   will actually land. This white marker is authoritative, including with scoped
-   weapons. A scope's built-in reticle is only accurate while your eye is
-   exactly aligned with the optic, so the two reticles separate when head
-   tracking moves your view off that sight line.
-3. **Tracking on, no aim marker** - the same as 2 without the marker, for a
-   cleaner screen when you are happy reading the sights themselves.
-
-The choice is saved to `HeadTracking.ini`, so it survives a restart. Pressing the
-key writes the mode you switched to into `Titanfall2HeadTracking.log`.
+Head tracking stays on while you aim. The weapon stays where your mouse or
+controller points it, so with your head turned it sits off to one side with its
+sights still lined up, and your rounds land where those sights point. Head
+movement is scaled to the zoom, so a scope does not magnify it. Leaning eases out
+while the sights are up, because it would move your eye off them.
 
 ## Configuration
 
@@ -213,8 +197,6 @@ Toggle=0x23
 YawMode=0x22
 ; Page Up: cycle 6DOF -> rotation-only -> position-only
 ModeCycle=0x21
-; Insert: cycle what head tracking does while the sights are up
-AdsMode=0x2D
 
 [View]
 ; true = horizon-locked yaw (default), false = camera-local yaw
@@ -233,15 +215,6 @@ CullFovScale=1.0
 ; the centre of the screen, where they mark the aim only while your head is
 ; centred.
 MoveCrosshair=1
-; What head tracking does while the sights are up. Cycled in game with Insert
-; or Ctrl+Shift+U, which writes the new value back here.
-;   paused  = tracking stands down until you lower the weapon (default)
-;   marker  = tracking stays live and a white cross marks where rounds land
-;   tracked = tracking stays live with nothing drawn
-; A head TILT rolls the view in all three: it moves neither your eye off the
-; barrel nor the aim off the middle of the screen, so there is nothing to
-; hand back to the gun.
-AdsMode=paused
 
 [Debug]
 ; Per-frame view diagnostics. The lifecycle lines - game build, profile
@@ -277,6 +250,10 @@ Start with `Titanfall2HeadTracking.log` next to `Titanfall2.exe`. It always reco
 - Raise `LocalSmoothing` above `0` only if a tracker on this PC is genuinely noisy. It defaults to `0` because a wired source is already stable and smoothing only costs latency.
 - Add a small `[Deadzone]` value in degrees to kill micro-jitter around center.
 - A webcam tracker needs light on your face and a frame rate the camera can sustain. A dark room is the usual cause of unstable neuralnet tracking.
+
+**The weapon is off to one side when I aim down sights.** Your head is turned:
+the weapon stays on your aim and you are looking past it. Turn back to it, or
+move your aim to where you are looking.
 
 **Wrong rotation axis or wrong direction**
 

@@ -32,8 +32,11 @@
 //
 // The game draws its crosshair in screen space, so it marks where shots land
 // only while the view is unrotated. It is moved onto the aim instead
-// (crosshair_hook.h), and with the sights up the head delta is faded out and the
-// view settles back onto the gun - see the ADS block below.
+// (crosshair_hook.h). Head tracking carries straight on through an aim: the
+// viewmodel is drawn through a view built from the same turned angles as the
+// world, so the weapon stays on the aim, off to one side with its sights lined up
+// when the head is turned. Only the lean eases out with the sights up - see
+// ComputeFrameDelta.
 //
 // Engagement is gated twice over. The build-profile registry (see
 // build_profile.cpp) means the hook is only installed on a Titanfall 2 build we
@@ -48,10 +51,11 @@
 #include <cstring>
 
 #include "cameraunlock/hooks/hook_manager.h"
-#include "ads.h"
+#include "cameraunlock/ads/ads_fade.h"
+#include "cameraunlock/camera/zoom_compensation.h"
 #include "ads_gate.h"
-#include "ads_marker.h"
 #include "ads_state.h"
+#include "frame_pose.h"
 #include "projection.h"
 #include "aim_trace.h"
 #include "angle_units.h"
@@ -151,10 +155,15 @@ void WriteCamera(void* view, const float fwd[3], const float right[3], const flo
 using RenderViewFn = void(*)(void* self, void* view, int clearFlags, int whatToDraw);
 RenderViewFn g_originalRenderView = nullptr;
 
-// Owns the ADS fade and the pose the sights came up on. Render-thread only,
-// like everything else reachable from the detour.
-AdsFade g_adsFade;
-AdsEntryPose g_adsEntry;
+// Eases the lean out while the sights are up. Render-thread only, like
+// everything else reachable from the detour.
+cameraunlock::ads::AdsFade g_leanFade;
+
+// The zoom compensation factor, measured off the main render view in
+// ApplyTracking and consumed by the NEXT frame's DecideFrame, which runs before
+// this frame's render view has been built. One frame behind through the raise
+// animation, exact once the zoom settles, and exactly 1.0 at the hip.
+float g_zoomFactor = 1.0f;
 
 // One-shot float/int dump of the struct RenderView is handed, so the field
 // offsets can be read off a live frame when a patch moves them. Enabled with
@@ -192,29 +201,60 @@ void DumpViewStruct(void* self, void* view) {
              off.main_view);
 }
 
-// ----- Detecting that the sights are coming up -------------------------------
+// ----- The zoom --------------------------------------------------------------
 //
-// The render view carries the frame's zoom factor: the player's base FOV tangent
+// The render view carries the frame's zoom: the player's base FOV tangent
 // divided by this frame's, so the FOV slider cancels out and the field reads
 // exactly 1.0 with the sights down and rises as they come up. Measured live on
 // sp_training: 1.0000 at the hip, 2.6116 through the gauntlet sniper's scope,
 // with tanfov * zoom pinned at 0.93361 through every frame of the transition.
 //
-// Read for the field-of-view measurement and the diagnostic only. Whether the
-// player is AIMING is a separate question with a separate answer - see
+// It drives the field-of-view measurement and the zoom compensation. Whether
+// the player is AIMING is a separate question with a separate answer - see
 // ads_state.h - because a weapon can have sights and no magnification, and this
 // field cannot see that at all.
-constexpr float kZoomHip = 1.01f;
-// Outside this the field is not the zoom factor - a render view that was never
+//
+// Outside this range the field is not the zoom - a render view that was never
 // filled in, or a build that moved it.
 constexpr float kZoomMin = 1.0f;
 constexpr float kZoomMax = 100.0f;
 
+bool ReadZoom(void* view, float& zoom) {
+    zoom = *Field(view, ActiveProfile().offsets.zoom);
+    return zoom >= kZoomMin && zoom < kZoomMax;
+}
+
 float ZoomFactor(void* view) {
-    const float z = *Field(view, ActiveProfile().offsets.zoom);
-    // Reading 1.0 on an implausible value leaves tracking exactly as it was
-    // rather than declaring ADS blind.
-    return (z >= kZoomMin && z < kZoomMax) ? z : 1.0f;
+    float z;
+    if (ReadZoom(view, z)) return z;
+    static bool s_logged = false;
+    if (!s_logged) {
+        s_logged = true;
+        HT_LOG("[zoom] render view zoom field reads %.4f, outside [%.0f, %.0f) - no zoom "
+               "compensation while it does", z, kZoomMin, kZoomMax);
+    }
+    return 1.0f;
+}
+
+// The compensation factor for the pose: this frame's vertical half-angle tangent
+// over the un-zoomed one, both off the SAME struct and the same axis. The base
+// is this frame's tangent times the zoom field, which is how the field is
+// defined, so the factor reduces to 1 / zoom; the tangents are carried through
+// FovZoomFactor anyway so the log line shows every term it came from.
+float MeasureZoomFactor(void* view, float zoom) {
+    const float tanNow = TanFov(view)[1];
+    const float tanBase = tanNow * zoom;
+    if (!(std::isfinite(tanNow) && tanNow > 0.0f)) return 1.0f;
+    const float factor = cameraunlock::camera::FovZoomFactor(tanNow, tanBase);
+
+    static bool s_logged = false;
+    if (!s_logged) {
+        s_logged = true;
+        HT_LOG("[zoom] tan(vfov/2) now=%.5f base=%.5f (vertical, both from the main render "
+               "view; base = now * zoom field %.4f) factor=%.4f - reads 1.0000 at the hip",
+               tanNow, tanBase, zoom, factor);
+    }
+    return factor;
 }
 
 // ----- Diagnostics -----------------------------------------------------------
@@ -231,8 +271,8 @@ constexpr int kDiagSteadyInterval = 2000;
 // Confirms the hook fires, the offsets resolve to a sane camera, and the delta
 // is being applied.
 void DiagnosticLog(const float* org, const float* cleanAng, const float* tanFov,
-                   const char* level, bool tracking, float zoom, bool aiming,
-                   const char* adsMode,
+                   const char* level, bool tracking, float zoom, float zoomFactor,
+                   bool aiming, float leanScale,
                    float dpitch, float dyaw, float droll, float ox, float oy, float oz,
                    float ndcX, float ndcY, float aimDist) {
     if (!VerboseLogging()) return;
@@ -270,12 +310,13 @@ void DiagnosticLog(const float* org, const float* cleanAng, const float* tanFov,
     const float* clean = CleanViewAngles();
     HT_TRACE("[view] map=%s org=(%.1f,%.1f,%.1f) clean=(p%.2f y%.2f r%.2f) "
              "drawn=(p%.2f y%.2f r%.2f) fov=%.1f cull=%.1f tanfov=(%.3f,%.3f) "
-             "zoom=%.3f ads=%d/%s | track=%d delta=(p%.2f y%.2f r%.2f) pos=(%.2f,%.2f,%.2f) "
+             "zoom=%.3f zfac=%.4f ads=%d lean=%.2f | track=%d delta=(p%.2f y%.2f r%.2f) "
+             "pos=(%.2f,%.2f,%.2f) "
              "aim=(%.3f,%.3f) dist=%.0f",
              level, org[0], org[1], org[2], clean[0], clean[1], clean[2],
              cleanAng[0], cleanAng[1], cleanAng[2],
              GetFovControl().DrawnFovDegrees(), GetFovControl().CulledFovDegrees(),
-             tanFov[0], tanFov[1], zoom, aiming ? 1 : 0, adsMode,
+             tanFov[0], tanFov[1], zoom, zoomFactor, aiming ? 1 : 0, leanScale,
              tracking ? 1 : 0, dpitch, dyaw, droll, ox, oy, oz, ndcX, ndcY, aimDist);
 }
 
@@ -448,9 +489,9 @@ void ApplyToView(void* view, bool worldSpaceYaw, float dpitch, float dyaw, float
 // A perspective projection's [0][0] and [1][1] are 1/tan(halfFov) terms, so
 // multiplying both by the ratio the FOV was widened by narrows the drawn cone
 // by exactly that much and leaves the aspect alone. tanfov is corrected with
-// them so anything else reading it - the ADS zoom check, the diagnostic, the
-// drawn field of view published for screen-space projection - sees the field of
-// view actually being drawn.
+// them so anything else reading it - the diagnostic, the drawn field of view
+// published for screen-space projection - sees the field of view actually being
+// drawn.
 void NarrowProjection(void* view, float ratio) {
     float* proj = ProjMatrix(view);
     proj[0] *= ratio;   // [0][0]
@@ -543,16 +584,18 @@ void ProbeDrawnCamera(void* self, void* mainView, float org[3], float ang[3]) {
 }
 
 // This frame's head pose, after everything that governs it: the campaign gate,
-// the tracking-loss fade and the ADS fade.
+// the tracking-loss fade, the zoom compensation and the lean easing.
 struct FrameDelta {
     bool tracking = false;
     bool worldSpaceYaw = true;
     // The sights are up. Decided once per frame with everything else, so the
     // half of the frame that draws cannot read a different answer from the half
-    // that built the camera - and false on every early return, so a menu leaves
-    // no stale flag behind for the marker to be placed against.
+    // that built the camera - and false on every early return.
     bool aiming = false;
-    AdsMode adsMode = kDefaultAdsMode;
+    // What the lean was scaled by: 1 at the hip, 0 with the sights up.
+    float leanScale = 1.0f;
+    // What the pose was scaled by for the zoom, 1 at the hip.
+    float zoomFactor = 1.0f;
     float dpitch = 0.0f, dyaw = 0.0f, droll = 0.0f;
     float ox = 0.0f, oy = 0.0f, oz = 0.0f;
 
@@ -562,90 +605,55 @@ struct FrameDelta {
     }
 };
 
-// One line each way, so a player who wonders what the view did when they raised
-// the sights can see that it was meant to, and which mode did it.
-void LogAdsEdge(bool aiming, AdsMode mode) {
+// One line each way, so the log shows what the lean did when the sights moved.
+void LogAdsEdge(bool aiming) {
     static bool s_was = false;
-    static AdsMode s_mode = kDefaultAdsMode;
-    if (aiming == s_was && mode == s_mode) return;
+    if (aiming == s_was) return;
     s_was = aiming;
-    s_mode = mode;
-    if (!aiming) {
-        HT_LOG("[ads] sights down - easing head tracking back to your head");
-        return;
-    }
-    switch (mode) {
-        case AdsMode::Paused:
-            HT_LOG("[ads] sights up - head tracking paused, view settling onto the aim; a head "
-                   "tilt still rolls it");
-            break;
-        case AdsMode::Marker:
-            HT_LOG("[ads] sights up - view settling onto the aim, head tracking carries on "
-                   "from there with the aim marker drawn");
-            break;
-        case AdsMode::Tracked:
-            HT_LOG("[ads] sights up - view settling onto the aim, head tracking carries on "
-                   "from there with nothing drawn");
-            break;
-    }
+    HT_LOG(aiming ? "[ads] sights up - lean easing out, head rotation carries on"
+                  : "[ads] sights down - lean easing back in");
 }
 
-// Works out the frame's pose, after the campaign / pause gate, the tracker's own
-// state and the ADS mode. The caller writes it into the render views.
+// Works out the frame's pose, after the campaign / pause gate and the tracker's
+// own state. The caller writes it into the render views.
 FrameDelta ComputeFrameDelta(Plugin& plugin, SessionKind session, bool aiming) {
     FrameDelta d;
-    d.adsMode = plugin.GetAdsMode();
 
     float yaw_r, pitch_r, roll_r;
     const bool live = plugin.GetRotationRadians(yaw_r, pitch_r, roll_r);
-    const TrackingState state = DecideTracking(session, live, aiming, d.adsMode);
-    if (!PoseApplies(state.verdict)) {
+    const TrackingState state = DecideTracking(session, live, aiming);
+    if (state.verdict != TrackingVerdict::Active) {
         // No pose to apply this frame - tracking off, no tracker, or not a live
-        // campaign. Drop the ADS fade, the pose the sights came up on and the
-        // traced aim distance, so the next aim re-enters cleanly instead of
-        // resuming against a pose from before the suppression.
-        g_adsFade.Reset();
-        g_adsEntry.Reset();
+        // campaign. Drop the lean fade and the traced aim distance, so the next
+        // aim starts from the hip instead of resuming a transition from before
+        // the suppression.
+        g_leanFade.Reset();
         ResetAimDistance();
         return d;
     }
 
     d.tracking = true;
     d.aiming = state.aiming;
-    plugin.GetPositionOffset(d.ox, d.oy, d.oz);
 
-    d.dpitch = pitch_r * kRadToDeg * kPitchSign;
-    d.dyaw   = yaw_r   * kRadToDeg * kYawSign;
-    d.droll  = roll_r  * kRadToDeg * kRollSign;
+    HeadPose pose;
+    plugin.GetPositionOffset(pose.x, pose.y, pose.z);
+    pose.pitch = pitch_r * kRadToDeg * kPitchSign;
+    pose.yaw   = yaw_r   * kRadToDeg * kYawSign;
+    pose.roll  = roll_r  * kRadToDeg * kRollSign;
 
-    // Raising the sights hands the view back to the gun: the head pose eases out
-    // over a fraction of a second and the frame settles onto the aim, which is
-    // where the crosshair already was. All three ADS modes make that same swing,
-    // and differ in where the fade lands.
-    //
-    //   paused           it lands on nothing, and stays there until the sights
-    //                    drop, so the sight picture is exactly the game's.
-    //   marker, tracked  it lands on the pose measured from the entry frame,
-    //                    which is identity at that moment, so head tracking
-    //                    carries on from the aim rather than from centre.
-    //
-    // Roll is in neither fade, in any mode - see BlendAdsPose, which is where
-    // that and the rest of the shape live.
-    //
-    // Both are asked in every mode, so the entry pose is dropped when the weapon
-    // comes down whichever mode was live while it was up, and a mode cycled
-    // mid-aim takes effect on that aim.
-    LogAdsEdge(d.aiming, d.adsMode);
-    const float scale = g_adsFade.Update(d.aiming, GetTickCount64());
-    const AdsEntryPose::Pose absolute{ d.dpitch, d.dyaw, d.droll, d.ox, d.oy, d.oz };
-    const AdsEntryPose::Pose relative = g_adsEntry.Relative(d.aiming, live, absolute);
-    const AdsEntryPose::Pose blended = BlendAdsPose(d.adsMode, scale, absolute, relative);
-    d.dpitch = blended.pitch;
-    d.dyaw   = blended.yaw;
-    d.droll  = blended.roll;
-    d.ox     = blended.x;
-    d.oy     = blended.y;
-    d.oz     = blended.z;
+    // Rotation carries straight on through an aim. Only the lean eases out with
+    // the sights up, because it moves the eye off the sight line; the fade is
+    // polled from the game's own flag every frame, never latched.
+    LogAdsEdge(d.aiming);
+    d.zoomFactor = g_zoomFactor;
+    d.leanScale = g_leanFade.Update(d.aiming, GetTickCount64());
+    pose = EaseLeanForSights(CompensateZoom(pose, d.zoomFactor), d.leanScale);
+    d.dpitch = pose.pitch;
+    d.dyaw   = pose.yaw;
+    d.droll  = pose.roll;
+    d.ox     = pose.x;
+    d.oy     = pose.y;
+    d.oz     = pose.z;
 
     // Which of the two yaw compositions the write uses is read here, once per
     // frame: the hotkey thread can flip it at any moment, and re-reading it per
@@ -684,10 +692,8 @@ FrameDelta TakeFrame() {
 // touching the structs rather than writing an identity: ApplyToView is not the
 // identity even at zero, because it rebuilds the view matrix and the
 // view-projection from the decoded camera rather than leaving them. Skipping the
-// write is what makes a suspended frame the frame the game would have drawn on
-// its own, which is the whole promise of handing the view back to the gun - and
-// with the sights up in `paused` the only delta left is the head tilt, so a head
-// held level takes that path every frame.
+// write is what makes an idle frame the frame the game would have drawn on its
+// own.
 void ApplyRenderViews(void* self, const FrameDelta& d, float bodyYaw, AimBasis& mainBasis) {
     void* main = MainView(self);
     void* world = WorldView(self);
@@ -750,14 +756,14 @@ void ApplyTracking(void* self) {
     // is a 64-bit heap pointer, which is what made writing 0x1d4 there crash the
     // game - so 0x1ac is only known to mean anything here. Reading it off a
     // sibling would be reading an unrelated float, and the failure is silent:
-    // any value in [1.0, 100.0) reads as "aiming", which would leave the mod
-    // suppressing tracking for the whole session while the log printed a
-    // perfectly plausible zoom.
+    // any value in [1.0, 100.0) reads as a plausible zoom, which would scale the
+    // head pose down for the whole session.
     //
-    // Read before the projection is narrowed, though nothing below touches the
-    // field, so the FOV measurement and the ADS check are the same number by
-    // construction rather than by two reads happening to agree.
+    // Read, with the tangent it is measured against, before the projection is
+    // narrowed, so the FOV measurement and the zoom compensation are the same
+    // number by construction rather than by two reads happening to agree.
     const float zoom = ZoomFactor(view);
+    g_zoomFactor = LooksLikeLiveView(view) ? MeasureZoomFactor(view, zoom) : 1.0f;
 
     UpdateFieldOfView(self, view, session, zoom);
 
@@ -769,12 +775,6 @@ void ApplyTracking(void* self) {
     // second tracker sample here would draw a different pose to the one the world
     // was culled to.
     const FrameDelta delta = TakeFrame();
-    // The frame's ADS answer, decided in BeginFrame along with everything else.
-    // Asking the game again here would be a second read of a flag that can change
-    // between the two, so the half of the frame that draws could disagree with the
-    // half that built the camera. A frame that never reached BeginFrame reports
-    // "not aiming", which is the safe direction: it fails toward stock.
-    const bool aiming = delta.aiming;
     AimBasis mainBasis;
     FrameCameras cameras;
     bool haveCameras = false;
@@ -811,23 +811,9 @@ void ApplyTracking(void* self) {
     PublishFrameCameras(haveCameras ? &cameras : nullptr);
 
     // Where the gun is pointing in the picture that was just built. ONE
-    // projection, two consumers - never a second formula for the ADS case, which
-    // is how two marks come to disagree about the same shot. At the hip it moves
-    // the game's own crosshair onto the gun; with the sights up in a tracked ADS
-    // mode it does the same for whatever crosshair the game still submits, and in
-    // `marker` mode it also places the mod's own mark, which is the only thing on
-    // screen saying where the rounds go once head tracking has moved the eye off
-    // the sight line.
-    //
-    // Nothing is placed in `paused`: the view has settled back onto the aim, so
-    // the game's own sight picture is the truth again, and the centre of the
-    // frame is where the aim is - which is where the zero-initialised offset
-    // leaves it. The head tilt that survives the fade there does not change that:
-    // a pure roll leaves the camera's forward vector where it was, so the aim
-    // point stays at the centre and the crosshair the game draws there is still
-    // marking it.
-    const bool adsTracked = aiming && delta.adsMode != AdsMode::Paused;
-    const bool haveAim = delta.tracking && (!aiming || adsTracked);
+    // projection, with the sights up or down: it moves the game's own crosshair
+    // onto the gun whenever the game submits one, and places the hit mark.
+    const bool haveAim = delta.tracking;
     float ndcX = 0.0f, ndcY = 0.0f;
     bool offScreen = false;
     float aimDist = 0.0f;
@@ -842,19 +828,8 @@ void ApplyTracking(void* self) {
     // reports the hit where the head is looking (hit_indicator.h).
     PublishHitIndicator(haveAim && !offScreen, ndcX, ndcY);
 
-    // Derived here, every frame, and never latched. A projection that was
-    // rejected - the gun behind the picture, an unreadable field of view - draws
-    // nothing at all rather than parking the mark where it was, which would put
-    // it somewhere the rounds are not going. A mode whose overlay has not come up
-    // yet behaves exactly like `tracked`.
-    bool markerVisible = false;
-    if (delta.tracking && aiming && delta.adsMode == AdsMode::Marker && EnsureAdsMarker()) {
-        markerVisible = !offScreen;
-    }
-    PublishAdsMarker(markerVisible, ndcX, ndcY);
-
     DiagnosticLog(drawnOrg, drawnAng, TanFov(view), CurrentLevelName(), delta.tracking, zoom,
-                  aiming, AdsModeValue(delta.adsMode),
+                  delta.zoomFactor, delta.aiming, delta.leanScale,
                   delta.dpitch, delta.dyaw, delta.droll, delta.ox, delta.oy, delta.oz,
                   ndcX, ndcY, aimDist);
 }
@@ -916,9 +891,9 @@ void Hook_RenderView(void* self, void* view, int clearFlags, int whatToDraw) {
 bool g_frameOpened = false;
 
 // The frame's pose, decided once: a tracker sample through the campaign gate,
-// the tracking-loss fade and the ADS fade. Everything the frame does with the
-// head - the culling frustum, the render views, the skybox, the cockpit - comes
-// from this one answer, because two samples of a live tracker are two different
+// the tracking-loss fade, the zoom and the lean easing. Everything the frame
+// does with the head - the culling frustum, the render views, the skybox, the
+// cockpit - comes from this one answer, because two samples of a live tracker are two different
 // poses and the frame would then be culled to one and drawn to the other.
 FrameRotation DecideFrame() {
     Plugin& plugin = GetPlugin();

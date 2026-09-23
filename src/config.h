@@ -6,8 +6,6 @@
 #include "cameraunlock/data/position_settings.h"
 #include "cameraunlock/math/smoothing_utils.h"
 
-#include "ads.h"
-
 namespace headtracking {
 
 // Every default value, once.
@@ -66,12 +64,6 @@ constexpr float kCullFovScale = 1.0f;
 constexpr int kToggleVk = 0x23;      // VK_END
 constexpr int kYawModeVk = 0x22;     // VK_NEXT (Page Down)
 constexpr int kModeCycleVk = 0x21;   // VK_PRIOR (Page Up)
-constexpr int kAdsModeVk = 0x2D;     // VK_INSERT
-
-// What head tracking does while the sights are up. `paused` is the mode that
-// cannot be wrong, so it is what a player who never touches this gets - see
-// ads_mode.h.
-constexpr AdsMode kAdsMode = kDefaultAdsMode;
 
 constexpr bool kWorldSpaceYaw = true;
 constexpr bool kMoveCrosshair = true;
@@ -186,12 +178,6 @@ struct Config {
     int toggle_vk     = defaults::kToggleVk;
     int yaw_mode_vk   = defaults::kYawModeVk;
     int mode_cycle_vk = defaults::kModeCycleVk;  // 6DOF -> rotation -> position
-    int ads_mode_vk   = defaults::kAdsModeVk;    // paused -> marker -> tracked
-
-    // What happens while the sights are up. Cycled in game as well as set here,
-    // and the cycle writes the new value back to the INI - it is the player's
-    // choice and it survives a restart.
-    AdsMode ads_mode = defaults::kAdsMode;
 
     // true  = horizon-locked yaw (yaw around world up axis, default)
     // false = camera-local yaw (yaw composed with pitch/roll)
@@ -209,11 +195,6 @@ struct Config {
     static std::string IniPath();  // <game folder>\HeadTracking.ini
     static Config LoadOrCreateDefault();
     static void WriteDefault(const std::string& path);
-
-    // Writes just the ADS mode back, leaving every other key and every comment
-    // in the file alone. The in-game cycle is the main way this setting gets
-    // set, so discarding the choice at the end of the session would be a bug.
-    static void SaveAdsMode(AdsMode mode);
 };
 
 }  // namespace headtracking

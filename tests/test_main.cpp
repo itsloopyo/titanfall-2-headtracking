@@ -20,8 +20,9 @@
 #include <cstring>
 #include <limits>
 
-#include "ads.h"
+#include "cameraunlock/ads/ads_fade.h"
 #include "ads_gate.h"
+#include "frame_pose.h"
 #include "projection.h"
 #include "rui_transform.h"
 #include "angle_units.h"
@@ -451,8 +452,6 @@ void TestDefaultConfigMatchesConstants() {
     CHECK(c.toggle_vk == kToggleVk);
     CHECK(c.yaw_mode_vk == kYawModeVk);
     CHECK(c.mode_cycle_vk == kModeCycleVk);
-    CHECK(c.ads_mode_vk == kAdsModeVk);
-    CHECK(c.ads_mode == kAdsMode);
     CHECK(c.world_space_yaw == kWorldSpaceYaw);
 }
 
@@ -460,7 +459,7 @@ void TestDefaultConfigMatchesConstants() {
 // unreachable and the collision is invisible until someone presses the key.
 void TestHotkeyDefaultsAreDistinct() {
     using namespace headtracking::defaults;
-    const int keys[] = { kToggleVk, kYawModeVk, kModeCycleVk, kAdsModeVk };
+    const int keys[] = { kToggleVk, kYawModeVk, kModeCycleVk };
     constexpr int n = static_cast<int>(sizeof(keys) / sizeof(keys[0]));
     for (int i = 0; i < n; ++i) {
         for (int j = i + 1; j < n; ++j) CHECK(keys[i] != keys[j]);
@@ -796,30 +795,6 @@ void TestMarkerKeepsItsDistance() {
     CHECK_NEAR(std::sqrt(after), std::sqrt(before), 1e-2f);
 }
 
-// ---- ads entry pose (cameraunlock/ads/entry_pose.h) ------------------------
-//
-// The entry pose is what makes the tracked ADS modes swing onto the aim and then
-// keep tracking from there, and it is the one piece of the shared ADS module the
-// camera boundary here feeds directly - degrees and Source units, straight out
-// of ComputeFrameDelta. Its four rules are pinned at the source too
-// (cameraunlock-core, cpp/tests/ads_tests.cpp); these are the cases this mod
-// would break on, and they are cheap.
-//
-// The cycle strings and the transition shape are NOT retested here. They are a
-// fleet-wide contract owned by the core, and a copy of them in every mod is a
-// second place for them to drift.
-
-namespace {
-AdsEntryPose::Pose MakePose(float pitch, float yaw, float roll,
-                            float x = 0.0f, float y = 0.0f, float z = 0.0f) {
-    AdsEntryPose::Pose p;
-    p.pitch = pitch; p.yaw = yaw; p.roll = roll;
-    p.x = x; p.y = y; p.z = z;
-    return p;
-}
-}  // namespace
-
-// Hip fire is untouched: whatever the tracker says reaches the camera.
 // ---- rui_transform ---------------------------------------------------------
 //
 // The crosshair and the hit indicator are drawn through the same kind of block,
@@ -843,188 +818,113 @@ void TestNdcToPixelsSpansHalfTheFrame() {
     CHECK_NEAR(py, -540.0f, 1e-3f);
 }
 
-void TestAdsPoseHipPassesThrough() {
-    AdsEntryPose entry;
-    const auto out = entry.Relative(false, true, MakePose(5.0f, -12.0f, 3.0f, 1, 2, 3));
-    CHECK_NEAR(out.pitch, 5.0f, 1e-6f);
-    CHECK_NEAR(out.yaw, -12.0f, 1e-6f);
-    CHECK_NEAR(out.roll, 3.0f, 1e-6f);
-    CHECK_NEAR(out.x, 1.0f, 1e-6f);
-    CHECK(!entry.HasEntry());
-}
-
-// The entry frame is identity, which is what puts the view on the aim point the
-// reticle was marking rather than wherever the head happens to be.
-void TestAdsPoseEntryFrameIsIdentity() {
-    AdsEntryPose entry;
-    const auto out = entry.Relative(true, true, MakePose(20.0f, -35.0f, 0.0f, 4, 5, 6));
-    CHECK(entry.HasEntry());
-    CHECK_NEAR(out.pitch, 0.0f, 1e-6f);
-    CHECK_NEAR(out.yaw, 0.0f, 1e-6f);
-    CHECK_NEAR(out.x, 0.0f, 1e-6f);
-    CHECK_NEAR(out.y, 0.0f, 1e-6f);
-    CHECK_NEAR(out.z, 0.0f, 1e-6f);
-}
-
-// Roll moves no aim point, so zeroing it would yank a head tilt the player is
-// actively holding back to level and lean it in again as they move: two horizon
-// jolts per aim, buying nothing.
-void TestAdsPoseRollStaysAbsolute() {
-    AdsEntryPose entry;
-    const auto first = entry.Relative(true, true, MakePose(0.0f, 0.0f, 14.0f));
-    CHECK_NEAR(first.roll, 14.0f, 1e-6f);
-    const auto later = entry.Relative(true, true, MakePose(0.0f, 0.0f, -6.0f));
-    CHECK_NEAR(later.roll, -6.0f, 1e-6f);
-}
-
-// Yaw arrives wrapped into -180..180, so a plain subtraction reads a 10 degree
-// move across the seam as -350 and whips the view a full turn the wrong way.
-void TestAdsPoseYawCrossesTheSeamTheShortWay() {
-    AdsEntryPose entry;
-    entry.Relative(true, true, MakePose(0.0f, 175.0f, 0.0f));
-    const auto out = entry.Relative(true, true, MakePose(0.0f, -175.0f, 0.0f));
-    CHECK_NEAR(out.yaw, 10.0f, 1e-4f);
-
-    AdsEntryPose back;
-    back.Relative(true, true, MakePose(0.0f, -175.0f, 0.0f));
-    CHECK_NEAR(back.Relative(true, true, MakePose(0.0f, 175.0f, 0.0f)).yaw, -10.0f, 1e-4f);
-}
-
-// Pitch is bounded by the tracker's own asin and cannot wrap, so it stays a
-// plain difference - and position goes relative with it.
-void TestAdsPosePitchAndPositionAreRelative() {
-    AdsEntryPose entry;
-    entry.Relative(true, true, MakePose(10.0f, 0.0f, 0.0f, 3.0f, -1.0f, 2.0f));
-    const auto out = entry.Relative(true, true, MakePose(-5.0f, 0.0f, 0.0f, 4.0f, -3.0f, 2.5f));
-    CHECK_NEAR(out.pitch, -15.0f, 1e-6f);
-    CHECK_NEAR(out.x, 1.0f, 1e-6f);
-    CHECK_NEAR(out.y, -2.0f, 1e-6f);
-    CHECK_NEAR(out.z, 0.5f, 1e-6f);
-}
-
-// The path that hits this: aim, open a menu, move your head, close it with the
-// sights still up. The interpolators publish nothing until a fresh packet lands,
-// so capturing on a dead frame would freeze a pre-suppression pose and hold the
-// whole aim at that offset.
-void TestAdsPoseCaptureWaitsForALiveRotation() {
-    AdsEntryPose entry;
-    entry.Relative(true, false, MakePose(9.0f, 9.0f, 0.0f));
-    CHECK(!entry.HasEntry());
-    const auto out = entry.Relative(true, true, MakePose(30.0f, -20.0f, 0.0f));
-    CHECK(entry.HasEntry());
-    CHECK_NEAR(out.pitch, 0.0f, 1e-6f);
-    CHECK_NEAR(out.yaw, 0.0f, 1e-6f);
-}
-
-// Lowering the weapon drops it, so the next aim re-enters from wherever the head
-// is then rather than from a pose two firefights old.
-void TestAdsPoseLoweringTheWeaponDropsTheEntry() {
-    AdsEntryPose entry;
-    entry.Relative(true, true, MakePose(10.0f, 40.0f, 0.0f));
-    const auto down = entry.Relative(false, true, MakePose(12.0f, 45.0f, 0.0f));
-    CHECK(!entry.HasEntry());
-    CHECK_NEAR(down.yaw, 45.0f, 1e-6f);
-    const auto again = entry.Relative(true, true, MakePose(12.0f, 45.0f, 0.0f));
-    CHECK_NEAR(again.yaw, 0.0f, 1e-6f);
-}
-
-// ---- ads blend (cameraunlock/ads/ads_blend.h) ------------------------------
+// ---- frame_pose: the lean easing and the zoom compensation -----------------
 //
-// What the ADS fade does to the frame's pose. The one rule that is not obvious
-// from either end of it is that ROLL is not in the fade at all: a head tilt
-// moves neither the eye off the barrel nor the aim off the middle of the frame,
-// and levelling it every time the sights come up is two horizon jolts per aim
-// for nothing. It shipped faded in `paused` and was reported from the chair as
-// roll switching off in a Titan the moment the sights came up.
+// Head tracking carries straight on through an aim. The sights ease the lean out
+// on core's AdsFade and touch nothing else, and the zoom scales yaw, pitch and
+// the lean so a scope does not magnify the head.
 
-void TestAdsBlendHipIsTheHeadPose() {
-    const auto absolute = MakePose(5.0f, -12.0f, 3.0f, 1.0f, 2.0f, 3.0f);
-    const auto relative = MakePose(0.0f, 0.0f, 3.0f, 0.0f, 0.0f, 0.0f);
-    for (const AdsMode mode : { AdsMode::Paused, AdsMode::Marker, AdsMode::Tracked }) {
-        const auto out = BlendAdsPose(mode, 1.0f, absolute, relative);
-        CHECK_NEAR(out.pitch, 5.0f, 1e-6f);
-        CHECK_NEAR(out.yaw, -12.0f, 1e-6f);
-        CHECK_NEAR(out.roll, 3.0f, 1e-6f);
-        CHECK_NEAR(out.z, 3.0f, 1e-6f);
-    }
+namespace {
+HeadPose MakePose(float pitch, float yaw, float roll, float x, float y, float z) {
+    HeadPose p;
+    p.pitch = pitch; p.yaw = yaw; p.roll = roll;
+    p.x = x; p.y = y; p.z = z;
+    return p;
 }
 
-// Sights fully up in `paused`: the view is the game's again, apart from the tilt
-// the player is holding.
-void TestAdsBlendPausedKeepsRollAndDropsTheRest() {
-    const auto absolute = MakePose(5.0f, -12.0f, 3.0f, 1.0f, 2.0f, 3.0f);
-    const auto out = BlendAdsPose(AdsMode::Paused, 0.0f, absolute, MakePose(0, 0, 3.0f));
-    CHECK_NEAR(out.pitch, 0.0f, 1e-6f);
-    CHECK_NEAR(out.yaw, 0.0f, 1e-6f);
-    CHECK_NEAR(out.x, 0.0f, 1e-6f);
-    CHECK_NEAR(out.y, 0.0f, 1e-6f);
-    CHECK_NEAR(out.z, 0.0f, 1e-6f);
-    CHECK_NEAR(out.roll, 3.0f, 1e-6f);
+void CheckPose(const HeadPose& got, const HeadPose& want, const char* file, int line) {
+    CheckNear(got.pitch, want.pitch, 1e-5f, "pitch", file, line);
+    CheckNear(got.yaw, want.yaw, 1e-5f, "yaw", file, line);
+    CheckNear(got.roll, want.roll, 1e-5f, "roll", file, line);
+    CheckNear(got.x, want.x, 1e-5f, "x", file, line);
+    CheckNear(got.y, want.y, 1e-5f, "y", file, line);
+    CheckNear(got.z, want.z, 1e-5f, "z", file, line);
+}
+#define CHECK_POSE(got, want) CheckPose((got), (want), __FILE__, __LINE__)
+
+using cameraunlock::ads::AdsFade;
+}  // namespace
+
+// At the hip the fade holds 1 and the pose goes through untouched.
+void TestHipPassesThePoseThrough() {
+    AdsFade fade;
+    const HeadPose in = MakePose(5.0f, -12.0f, 3.0f, 1.0f, 2.0f, 3.0f);
+    const float scale = fade.Update(false, 1000);
+    CHECK_NEAR(scale, 1.0f, 0.0f);
+    CHECK_POSE(EaseLeanForSights(in, scale), in);
 }
 
-// And halfway through the fade the tilt is still whole - it does not sag toward
-// level and come back.
-void TestAdsBlendPausedDoesNotFadeRollThroughTheTransition() {
-    const auto absolute = MakePose(8.0f, -20.0f, 3.0f, 0.0f, 0.0f, 4.0f);
-    const auto out = BlendAdsPose(AdsMode::Paused, 0.5f, absolute, MakePose(0, 0, 3.0f));
-    CHECK_NEAR(out.pitch, 4.0f, 1e-6f);
-    CHECK_NEAR(out.yaw, -10.0f, 1e-6f);
-    CHECK_NEAR(out.z, 2.0f, 1e-6f);
-    CHECK_NEAR(out.roll, 3.0f, 1e-6f);
+// With the sights fully up, rotation - roll included - is absolute and
+// unscaled, and the lean is gone.
+void TestSightsUpDropsTheLeanAndKeepsRotation() {
+    AdsFade fade;
+    fade.Update(true, 0);
+    const float scale = fade.Update(true, AdsFade::kLowerMs + 1);
+    CHECK_NEAR(scale, 0.0f, 0.0f);
+    const HeadPose out = EaseLeanForSights(MakePose(20.0f, -35.0f, 14.0f, 4.0f, 5.0f, 6.0f), scale);
+    CHECK_POSE(out, MakePose(20.0f, -35.0f, 14.0f, 0.0f, 0.0f, 0.0f));
 }
 
-// The tracked modes land on the entry-relative pose, whose roll is the absolute
-// one already - so the two branches agree about roll and about nothing else.
-void TestAdsBlendTrackedLandsOnTheEntryRelativePose() {
-    const auto absolute = MakePose(5.0f, -12.0f, 3.0f, 1.0f, 2.0f, 3.0f);
-    const auto relative = MakePose(2.0f, -4.0f, 3.0f, 0.5f, 0.5f, 1.0f);
-    for (const AdsMode mode : { AdsMode::Marker, AdsMode::Tracked }) {
-        const auto out = BlendAdsPose(mode, 0.0f, absolute, relative);
-        CHECK_NEAR(out.pitch, 2.0f, 1e-6f);
-        CHECK_NEAR(out.yaw, -4.0f, 1e-6f);
-        CHECK_NEAR(out.x, 0.5f, 1e-6f);
-        CHECK_NEAR(out.z, 1.0f, 1e-6f);
-        CHECK_NEAR(out.roll, 3.0f, 1e-6f);
-    }
+// Halfway down, the lean is scaled by the fade and rotation is still whole.
+void TestMidTransitionScalesOnlyTheLean() {
+    AdsFade fade;
+    fade.Update(true, 0);
+    const float scale = fade.Update(true, AdsFade::kLowerMs / 2);
+    CHECK(scale > 0.0f && scale < 1.0f);
+    const HeadPose out = EaseLeanForSights(MakePose(8.0f, -20.0f, 3.0f, 2.0f, -4.0f, 6.0f), scale);
+    CHECK_POSE(out, MakePose(8.0f, -20.0f, 3.0f, 2.0f * scale, -4.0f * scale, 6.0f * scale));
+}
+
+// A tap of the aim button reverses the fade mid-leg. It must continue from where
+// it was, not jump to either end.
+void TestReversalContinuesFromWhereItWas() {
+    AdsFade fade;
+    fade.Update(true, 0);
+    const float before = fade.Update(true, AdsFade::kLowerMs / 2);
+    const float after = fade.Update(false, AdsFade::kLowerMs / 2);
+    CHECK_NEAR(after, before, 1e-6f);
+    const float later = fade.Update(false, AdsFade::kLowerMs / 2 + 20);
+    CHECK(later > after && later < 1.0f);
+}
+
+// Unzoomed, the compensation is the identity.
+void TestZoomAtTheHipIsIdentity() {
+    const HeadPose in = MakePose(10.0f, -30.0f, 7.0f, 1.0f, 2.0f, 3.0f);
+    CHECK_POSE(CompensateZoom(in, 1.0f), in);
+}
+
+// Through a zoom, yaw and pitch shrink so their SCREEN displacement matches the
+// un-zoomed one (tangents scale by the factor), the lean scales linearly, and
+// roll is left alone. 2.6116 is the gauntlet sniper's measured zoom.
+void TestZoomScalesYawPitchAndLeanNotRoll() {
+    const float factor = cameraunlock::camera::FovZoomFactor(0.93361f / 2.6116f, 0.93361f);
+    CHECK_NEAR(factor, 1.0f / 2.6116f, 1e-6f);
+    const HeadPose out = CompensateZoom(MakePose(10.0f, -30.0f, 7.0f, 1.0f, 2.0f, 3.0f), factor);
+    CHECK_NEAR(std::tan(out.pitch * kDegToRad), std::tan(10.0f * kDegToRad) * factor, 1e-5f);
+    CHECK_NEAR(std::tan(out.yaw * kDegToRad), std::tan(-30.0f * kDegToRad) * factor, 1e-5f);
+    CHECK_NEAR(out.roll, 7.0f, 0.0f);
+    CHECK_NEAR(out.x, 1.0f * factor, 1e-6f);
+    CHECK_NEAR(out.y, 2.0f * factor, 1e-6f);
+    CHECK_NEAR(out.z, 3.0f * factor, 1e-6f);
 }
 
 // ---- ads_gate --------------------------------------------------------------
 //
-// The verdict walk. ADS is tested last so a menu still reports its own reason
-// when both are true at once, and no early return may leave the sights flag set.
+// The verdict walk. The sights never close the gate; ADS is taken last so a menu
+// still reports its own reason, and no early return may leave the flag set.
 
-void TestGatePausedModeClosesTheGateAndStillReportsTheSights() {
-    const auto s = DecideTracking(SessionKind::Campaign, true, true, AdsMode::Paused);
-    CHECK(s.verdict == TrackingVerdict::AdsSuspended);
-    // The gate says whether tracking applies; the flag says the sights are up.
-    // The per-frame code needs both, so `paused` still reports the sights.
+void TestGateStaysOpenThroughAnAim() {
+    const auto s = DecideTracking(SessionKind::Campaign, true, true);
+    CHECK(s.verdict == TrackingVerdict::Active);
     CHECK(s.aiming);
-    // A pose still reaches the camera, because suspending is an ease-out rather
-    // than a switch. Dropping it on the falling edge would throw the smoothing
-    // state away and swing the view back through the head angle on the way out.
-    CHECK(PoseApplies(s.verdict));
 }
 
-void TestGateTrackedModesStayOpenThroughAnAim() {
-    for (const AdsMode mode : { AdsMode::Marker, AdsMode::Tracked }) {
-        const auto s = DecideTracking(SessionKind::Campaign, true, true, mode);
-        CHECK(s.verdict == TrackingVerdict::Active);
-        CHECK(s.aiming);
-        CHECK(PoseApplies(s.verdict));
-    }
+void TestGateHipFireIsActive() {
+    const auto s = DecideTracking(SessionKind::Campaign, true, false);
+    CHECK(s.verdict == TrackingVerdict::Active);
+    CHECK(!s.aiming);
 }
 
-void TestGateHipFireIsActiveInEveryMode() {
-    for (const AdsMode mode : { AdsMode::Paused, AdsMode::Marker, AdsMode::Tracked }) {
-        const auto s = DecideTracking(SessionKind::Campaign, true, false, mode);
-        CHECK(s.verdict == TrackingVerdict::Active);
-        CHECK(!s.aiming);
-    }
-}
-
-// A menu, a loading screen or a multiplayer map outranks ADS in the reported
-// reason, and clears the flag with it: a stale flag through a menu would leave
-// the marker placed against a weapon that is not raised.
 void TestGateSuppressionOutranksAdsAndClearsTheFlag() {
     const struct { SessionKind session; TrackingVerdict verdict; } cases[] = {
         { SessionKind::NoLevel,     TrackingVerdict::NoLevel },
@@ -1033,33 +933,16 @@ void TestGateSuppressionOutranksAdsAndClearsTheFlag() {
         { SessionKind::Paused,      TrackingVerdict::GamePaused },
     };
     for (const auto& c : cases) {
-        for (const AdsMode mode : { AdsMode::Paused, AdsMode::Marker, AdsMode::Tracked }) {
-            const auto s = DecideTracking(c.session, true, true, mode);
-            CHECK(s.verdict == c.verdict);
-            CHECK(!s.aiming);
-            CHECK(!PoseApplies(s.verdict));
-        }
+        const auto s = DecideTracking(c.session, true, true);
+        CHECK(s.verdict == c.verdict);
+        CHECK(!s.aiming);
     }
 }
 
-// No tracker is not an ADS verdict either, and it must not report the sights.
 void TestGateNoTrackerReportsItsOwnReason() {
-    const auto s = DecideTracking(SessionKind::Campaign, false, true, AdsMode::Tracked);
+    const auto s = DecideTracking(SessionKind::Campaign, false, true);
     CHECK(s.verdict == TrackingVerdict::NoTracker);
     CHECK(!s.aiming);
-    CHECK(!PoseApplies(s.verdict));
-}
-
-// The state is recomputed from the game every frame rather than latched on an
-// edge, so an exit event that never arrives - a state machine that transitions
-// without one, an aim released while firing - heals on the next frame instead of
-// stranding the player in ADS behaviour.
-void TestGateHealsWithoutAnExitEdge() {
-    const auto aimed = DecideTracking(SessionKind::Campaign, true, true, AdsMode::Paused);
-    CHECK(aimed.verdict == TrackingVerdict::AdsSuspended);
-    const auto healed = DecideTracking(SessionKind::Campaign, true, false, AdsMode::Paused);
-    CHECK(healed.verdict == TrackingVerdict::Active);
-    CHECK(!healed.aiming);
 }
 
 }  // namespace
@@ -1100,23 +983,16 @@ int main() {
     TestMarkerUntrackedFrameIsIdentity();
     TestMarkerLandsWhereTheDrawnCameraPutsIt();
     TestMarkerKeepsItsDistance();
-    TestAdsPoseHipPassesThrough();
-    TestAdsPoseEntryFrameIsIdentity();
-    TestAdsPoseRollStaysAbsolute();
-    TestAdsPoseYawCrossesTheSeamTheShortWay();
-    TestAdsPosePitchAndPositionAreRelative();
-    TestAdsPoseCaptureWaitsForALiveRotation();
-    TestAdsPoseLoweringTheWeaponDropsTheEntry();
-    TestAdsBlendHipIsTheHeadPose();
-    TestAdsBlendPausedKeepsRollAndDropsTheRest();
-    TestAdsBlendPausedDoesNotFadeRollThroughTheTransition();
-    TestAdsBlendTrackedLandsOnTheEntryRelativePose();
-    TestGatePausedModeClosesTheGateAndStillReportsTheSights();
-    TestGateTrackedModesStayOpenThroughAnAim();
-    TestGateHipFireIsActiveInEveryMode();
+    TestHipPassesThePoseThrough();
+    TestSightsUpDropsTheLeanAndKeepsRotation();
+    TestMidTransitionScalesOnlyTheLean();
+    TestReversalContinuesFromWhereItWas();
+    TestZoomAtTheHipIsIdentity();
+    TestZoomScalesYawPitchAndLeanNotRoll();
+    TestGateStaysOpenThroughAnAim();
+    TestGateHipFireIsActive();
     TestGateSuppressionOutranksAdsAndClearsTheFlag();
     TestGateNoTrackerReportsItsOwnReason();
-    TestGateHealsWithoutAnExitEdge();
 
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

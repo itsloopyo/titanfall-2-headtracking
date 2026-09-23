@@ -59,7 +59,6 @@ add_library(Titanfall2HeadTracking SHARED
     src/hit_indicator.cpp
     src/world_marker_hook.cpp
     src/ads_state.cpp
-    src/ads_marker.cpp
     src/aim_trace.cpp
     src/build_profile.cpp
     src/game_state.cpp
@@ -94,7 +93,8 @@ add_executable(Titanfall2HeadTrackingTests tests/test_main.cpp)
 
 target_include_directories(Titanfall2HeadTrackingTests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    # The shared ADS module is header-only, so the tests reach it by include path
+    # The shared core headers the pure maths uses (the ADS fade, the zoom
+    # compensation) are header-only, so the tests reach them by include path
     # rather than by linking the core library - this target still links nothing.
     ${CMAKE_CURRENT_SOURCE_DIR}/cameraunlock-core/cpp/include
 )

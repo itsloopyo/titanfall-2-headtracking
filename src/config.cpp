@@ -160,8 +160,6 @@ void Config::WriteDefault(const std::string& path) {
     w.WriteHex("YawMode", defaults::kYawModeVk);
     w.WriteComment(" Page Up: cycle 6DOF -> rotation-only -> position-only");
     w.WriteHex("ModeCycle", defaults::kModeCycleVk);
-    w.WriteComment(" Insert: cycle what head tracking does while the sights are up");
-    w.WriteHex("AdsMode", defaults::kAdsModeVk);
     w.WriteBlankLine();
     w.WriteSection("View");
     w.WriteComment(" true = horizon-locked yaw (default), false = camera-local yaw");
@@ -180,15 +178,6 @@ void Config::WriteDefault(const std::string& path) {
     w.WriteComment(" pinned to the centre of the screen, where it marks the aim only while your");
     w.WriteComment(" head is centred.");
     w.WriteBool("MoveCrosshair", defaults::kMoveCrosshair);
-    w.WriteComment(" What head tracking does while the sights are up. Cycled in game with Insert");
-    w.WriteComment(" or Ctrl+Shift+U, which writes the new value back here.");
-    w.WriteComment("   paused  = tracking stands down until you lower the weapon (default)");
-    w.WriteComment("   marker  = tracking stays live and a white cross marks where rounds land");
-    w.WriteComment("   tracked = tracking stays live with nothing drawn");
-    w.WriteComment(" A head TILT rolls the view in all three: it moves neither your eye off the");
-    w.WriteComment(" barrel nor the aim off the middle of the screen, so there is nothing to");
-    w.WriteComment(" hand back to the gun.");
-    w.WriteString("AdsMode", AdsModeValue(defaults::kAdsMode));
     w.WriteBlankLine();
     w.WriteSection("Debug");
     w.WriteComment(" Per-frame [view] diagnostics. The lifecycle lines - game build, profile");
@@ -196,19 +185,6 @@ void Config::WriteDefault(const std::string& path) {
     w.WriteBool("LogToFile", defaults::kLogToFile);
     w.WriteComment(" One-shot render view field dump, for rederiving offsets on a new build");
     w.WriteBool("DumpViewSetup", defaults::kDumpViewSetup);
-}
-
-// GetPrivateProfileString's writer half, which is the only one that can change
-// one key of an existing file: IniWriter truncates, so writing this back through
-// it would throw away every other setting and every comment. A file that is not
-// there yet is created with just this section in it, and the next launch fills
-// the rest in.
-void Config::SaveAdsMode(AdsMode mode) {
-    const std::string path = IniPath();
-    if (!WritePrivateProfileStringA("View", "AdsMode", AdsModeValue(mode), path.c_str())) {
-        HT_LOG("[config] could not save AdsMode to %s (error %lu) - the setting applies for this "
-               "session but will not survive a restart", path.c_str(), GetLastError());
-    }
 }
 
 Config Config::LoadOrCreateDefault() {
@@ -296,7 +272,6 @@ Config Config::LoadOrCreateDefault() {
     c.toggle_vk     = r.ReadHex("Hotkeys", "Toggle",    defaults::kToggleVk);
     c.yaw_mode_vk   = r.ReadHex("Hotkeys", "YawMode",   defaults::kYawModeVk);
     c.mode_cycle_vk = r.ReadHex("Hotkeys", "ModeCycle", defaults::kModeCycleVk);
-    c.ads_mode_vk   = r.ReadHex("Hotkeys", "AdsMode",   defaults::kAdsModeVk);
 
     c.world_space_yaw = r.ReadBool("View", "WorldSpaceYaw", defaults::kWorldSpaceYaw);
     // 0 means "follow the game's own setting" and is the only value below the
@@ -309,13 +284,6 @@ Config Config::LoadOrCreateDefault() {
                                limits::kMinCullFovScale, limits::kMaxCullFovScale);
 
     c.move_crosshair = r.ReadBool("View", "MoveCrosshair", defaults::kMoveCrosshair);
-    // An absent key gives the default, and so does anything that is not one of
-    // the three values - a typo, or a mode renamed since an older release wrote
-    // this file. Falling back is the migration path; falling through to whichever
-    // branch happens to be last would hand the player head tracking through their
-    // sights that they never asked for.
-    c.ads_mode = ParseAdsMode(
-        r.ReadString("View", "AdsMode", AdsModeValue(defaults::kAdsMode)).c_str());
 
     c.log_to_file = r.ReadBool("Debug", "LogToFile", defaults::kLogToFile);
     c.dump_view_setup = r.ReadBool("Debug", "DumpViewSetup", defaults::kDumpViewSetup);

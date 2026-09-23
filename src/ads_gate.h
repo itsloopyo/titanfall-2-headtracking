@@ -1,6 +1,5 @@
 #pragma once
 
-#include "ads.h"
 #include "game_state.h"
 
 namespace headtracking {
@@ -11,16 +10,12 @@ namespace headtracking {
 // Pulled out of the render hook as a pure function so the walk can be exercised
 // without the game. What it decides is one branch wide, and every one of its
 // answers is a frame the player either sees their head in or does not.
+//
+// Aiming down sights is not a verdict. Head tracking carries straight on
+// through the aim; the sights only ease the lean out (frame_pose.h).
 enum class TrackingVerdict {
     // The head pose is applied in full.
     Active,
-    // The sights are up in `paused` mode. The pose is still fed to the camera,
-    // because it is being EASED off rather than switched off - see AdsFade - and
-    // once it has gone the frame is the frame the game would have drawn on its
-    // own, bar the head tilt: roll is left out of the fade in every mode, since
-    // it moves neither the eye off the barrel nor the aim off the middle of the
-    // frame (cameraunlock/ads/ads_blend.h).
-    AdsSuspended,
     NoLevel,
     Loading,
     Multiplayer,
@@ -31,19 +26,16 @@ enum class TrackingVerdict {
 
 struct TrackingState {
     TrackingVerdict verdict = TrackingVerdict::NoLevel;
-    // The sights are up. Reported in EVERY mode, including `paused` where the
-    // gate is closed: the gate says whether tracking applies, this says what the
-    // weapon is doing, and the per-frame code needs both - the marker and the
-    // crosshair are placed from it.
+    // The sights are up. Only reported on an Active frame: it drives the lean
+    // easing, and a stale flag through a menu would ease the lean against a
+    // weapon that is not raised.
     bool aiming = false;
 };
 
-// ADS is tested LAST, so a menu, a loading screen or a multiplayer map still
-// reports its own reason when both are true at once - and every earlier return
-// leaves `aiming` false, because a stale flag through a menu would keep the
-// render-side placement running against a weapon that is not raised.
-inline TrackingState DecideTracking(SessionKind session, bool haveRotation, bool aiming,
-                                    AdsMode mode) {
+// ADS is taken LAST, so a menu, a loading screen or a multiplayer map still
+// reports its own reason when both are true at once, and every earlier return
+// leaves `aiming` false.
+inline TrackingState DecideTracking(SessionKind session, bool haveRotation, bool aiming) {
     TrackingState s;
     switch (session) {
         case SessionKind::NoLevel:     s.verdict = TrackingVerdict::NoLevel;     return s;
@@ -57,17 +49,8 @@ inline TrackingState DecideTracking(SessionKind session, bool haveRotation, bool
         return s;
     }
     s.aiming = aiming;
-    s.verdict = (aiming && AdsSuspendsTracking(mode)) ? TrackingVerdict::AdsSuspended
-                                                      : TrackingVerdict::Active;
+    s.verdict = TrackingVerdict::Active;
     return s;
-}
-
-// A pose is fed to the camera in both of the first two verdicts. AdsSuspended
-// needs it because suspending is an ease-out, not a switch: dropping the pose on
-// the falling edge into ADS would throw away the smoothing state, and lowering
-// the weapon would then swing the view back through the whole head angle.
-inline bool PoseApplies(TrackingVerdict verdict) {
-    return verdict == TrackingVerdict::Active || verdict == TrackingVerdict::AdsSuspended;
 }
 
 }  // namespace headtracking

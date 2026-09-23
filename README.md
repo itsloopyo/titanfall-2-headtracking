@@ -14,6 +14,7 @@ An unofficial head tracking mod for Titanfall 2 that moves the view with your he
 
 - **Decoupled look and aim** - head tracking moves the camera; your shots still go where the mouse or controller points.
 - **6DOF positional tracking** - lean and peek with head position, not just rotation.
+- **Works with any OpenTrack compatible tracker** - free options available for PC, iOS and Android
 
 ## Requirements
 
@@ -22,6 +23,13 @@ An unofficial head tracking mod for Titanfall 2 that moves the view with your he
 - Windows 10 or 11, 64-bit. Titanfall 2 is a 64-bit game and the mod ships as a 64-bit ASI plugin.
 
 ## Installation
+
+### Lopari
+
+Download [Lopari](https://lopari.app), choose **Titanfall 2**, and click
+**Play with head tracking**.
+
+### Standalone Installer
 
 1. Download `Titanfall2HeadTracking-vX.Y.Z-installer.zip` from the [Releases page](https://github.com/itsloopyo/titanfall-2-headtracking/releases).
 2. Extract it anywhere.

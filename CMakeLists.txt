@@ -49,6 +49,7 @@ add_library(Titanfall2HeadTracking SHARED
     src/pch.cpp
     src/dllmain.cpp
     src/config.cpp
+    src/legacy_config/legacy_config.cpp
     src/plugin.cpp
     src/hotkey_handler.cpp
     src/camera_hook.cpp
@@ -100,5 +101,30 @@ target_include_directories(Titanfall2HeadTrackingTests PRIVATE
 )
 
 set_target_properties(Titanfall2HeadTrackingTests PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+)
+
+# The config differential test: d366649's reader (the oracle, the dev pre-release), the
+# frozen reader in src/legacy_config and core's mutation corpus over the dev build's
+# first-run output. Built with the mod like the tests above; `pixi run test` runs it.
+add_executable(Titanfall2ConfigDifferential
+    tests/config_differential/differential_tests.cpp
+    tests/config_differential/oracle/oracle_config.cpp
+    src/legacy_config/legacy_config.cpp
+)
+
+target_include_directories(Titanfall2ConfigDifferential PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/config_differential
+    ${CMAKE_CURRENT_SOURCE_DIR}/cameraunlock-core/cpp/include
+)
+
+target_compile_definitions(Titanfall2ConfigDifferential PRIVATE
+    TITANFALL2_DIFFERENTIAL_INPUTS="${CMAKE_CURRENT_SOURCE_DIR}/tests/config_differential/inputs"
+)
+
+target_link_libraries(Titanfall2ConfigDifferential PRIVATE cameraunlock)
+
+set_target_properties(Titanfall2ConfigDifferential PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
 )

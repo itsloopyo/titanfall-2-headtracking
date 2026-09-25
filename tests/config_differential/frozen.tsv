@@ -1,0 +1,32 @@
+# The config differential test's record: the published build, the frozen legacy reader,
+# the core sources it compiles, and the oracle and first-run input the test measures it
+# against. check-frozen.ps1 fails when a working-tree path below stops matching its hash.
+# Rows naming <commit>:<path> are provenance, the blobs the oracle and the import were
+# taken from, and are not checked (CI clones no tags).
+#
+# Published builds: only the rolling dev pre-release 0.0.0-nightly.20260830.d366649 at
+# d366649 (cameraunlock-core 0f7a634). No v* release.
+# The frozen reader is src/config.cpp's reading half as of cc165ee (cameraunlock-core
+# c480d8a; 10789ea from 351a742, which moved no source the reader compiles).
+#
+# path	sha256	what
+src/legacy_config/legacy_config.h	9cd372c9e9c989e0a0cbc66277c424e27dc9b4e96cd80f9c4eaa690aa0cc5077	the frozen reader
+src/legacy_config/legacy_config.cpp	3b9be9b597e09f19e2daad80ce836a22bdddfd105b2a7271c3a1b046f9eaeab9	the frozen reader
+cameraunlock-core/cpp/include/cameraunlock/config/ini_reader.h	a7ffb44210ff59672fa97e8e5feaa2cb3e81938fcc0334a384c68bc371b3857a	compiled by the import and the oracle; the same bytes at 0f7a634, c480d8a and 10789ea
+cameraunlock-core/cpp/src/config/ini_reader.cpp	e01515c2656aaf533bae4350dc45b702c3e3d4043935743dcc9bd5ea581fbe1c	compiled by the import and the oracle; the same bytes at 0f7a634, c480d8a and 10789ea
+cameraunlock-core/cpp/include/cameraunlock/logging/file_log.h	43bdd2ef8554c78e5f440333463750c13b95110fe672b0b6e273244df9e7d169	compiled by the import and the oracle; the same bytes at 0f7a634, c480d8a and 10789ea
+cameraunlock-core/cpp/src/logging/file_log.cpp	73c53c2baa06bbfebe8211f62678aa2b60cb95f604743d3686951ba56b87ea47	compiled by the import and the oracle; the same bytes at 0f7a634, c480d8a and 10789ea
+tests/config_differential/oracle/oracle_config.h	441a4240d690ecea1f44e03c556b4c9675ce41a3fc3e3362eddd650b210712c5	the oracle; d366649:src/config.h with the namespace, the ADS include and LoadOrCreateDefault's path parameter changed
+tests/config_differential/oracle/oracle_config.cpp	788cc8bccd2ae71ef08d5929458f34ddf62c3dcea4c033023efd630fb49fa0b1	the oracle; d366649:src/config.cpp with the namespace, the includes and LoadOrCreateDefault's path parameter changed
+tests/config_differential/oracle/oracle_ads.h	bcb1b3333fb7c86af4cbf01d9f01a53924b7fd27e63fcb7a97a019a7859db823	the oracle; 0f7a634's ads_mode.h with the names d366649's src/ads.h gives the config
+tests/config_differential/inputs/first-run-d366649.ini	0d732bd993b7a42c466e9618af6a5e6943dff694e2ec06985b71fd7966f71d86	the first-run output of dev d366649, extracted once
+d366649:src/config.h	69e87d008c9b3996e15b2e15c3d1ccbe96555295624dedbf741f62e95e6cfccf	oracle source
+d366649:src/config.cpp	dfbef7ab7a3e25ed1b2f7f5c77d4c00af6cb14c80e49c441b69c11800f2323cb	oracle source
+d366649:src/ads.h	4919f5a9dd4dfcc538889dde04af9870ed2fe784afdf2df44b686d36156089c4	oracle source
+d366649:src/plugin.cpp	9a19928a6b190f594257e45c1df70f1b50f5e010d314924101f3031180eacb9b	oracle source
+d366649:src/hotkey_handler.cpp	f0b18e17e2a3c2d0feb90c24aeedba3fd42e164b7c9aa2593d41272ec94410ca	oracle source
+0f7a634:cpp/include/cameraunlock/ads/ads_mode.h	18ac14571d8c14b3a946b2a1de66bdef436bfab46f332e2c94b080447e0aa170	oracle source (oracle/oracle_ads.h)
+cc165ee:src/config.h	d62755c636a212baf0baca3f40c4de8381aafe6b4167b4055609a2c398382bc4	the reader and startup code the import was frozen from
+cc165ee:src/config.cpp	489da4e792d4dce499395b1108e3ab8c7d2dbf39a4c84efa650ae72c4431f4aa	the reader and startup code the import was frozen from
+cc165ee:src/plugin.cpp	3c1b8ae852bfce93ac50166ae44e3f37402db36e9c5451d616f98938501f9a3a	the reader and startup code the import was frozen from
+cc165ee:src/hotkey_handler.cpp	daef642711e64007ed22769ab639c1791fe75cee6136ae02159541471e35cf0e	the reader and startup code the import was frozen from

@@ -16,7 +16,7 @@ the README demo clip, covered at the end of this file.
 | injector | `f7fd18f` (inside Ultimate ASI Loader v9.7.2) | zlib | Compiled into the vendored dinput8.dll |
 | miniz | 3.0.0 (inside Ultimate ASI Loader v9.7.2) | MIT | Compiled into the vendored dinput8.dll |
 | MinHook | `c3fcafdc1014` | BSD-2-Clause | Compiled into `Titanfall2HeadTracking.asi` |
-| cameraunlock-core | f441e29427b7422a584ba492dddd7788881804b0 | MIT | Compiled into `Titanfall2HeadTracking.asi` |
+| cameraunlock-core | 10789ea08765ae7a1a336bd62db4e8b8722a5310 | MIT | Compiled into `Titanfall2HeadTracking.asi` |
 | OpenTrack | n/a | ISC | Not bundled; UDP protocol interoperability only |
 
 ---
@@ -250,7 +250,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 Git submodule at `cameraunlock-core/`, compiled into `Titanfall2HeadTracking.asi`. Our own code,
 MIT licensed, reproduced here so the notices are complete.
 
-- Pinned commit: `f441e29427b7422a584ba492dddd7788881804b0`
+- Pinned commit: `10789ea08765ae7a1a336bd62db4e8b8722a5310`
 
 ```
 MIT License

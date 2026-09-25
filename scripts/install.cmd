@@ -32,6 +32,10 @@ set "FILES_DIR=%SCRIPT_DIR%plugins"
 set "DEPLOY_FAILED=1"
 set "VENDOR_DIR=%SCRIPT_DIR%vendor\ultimate-asi-loader"
 set "VENDOR_DLL=%VENDOR_DIR%\dinput8.dll"
+:: Not used by this mod. Set blank so a value another mod's wrapper left in
+:: the same console does not reach the body.
+set "ASI_SUBDIR="
+set "ASI_LOADER_VERSION="
 :: --- END CONFIG BLOCK ---
 
 :: Pin delayed expansion off before `%*` is expanded on the `call` below.

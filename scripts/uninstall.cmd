@@ -46,6 +46,14 @@ set "BACKUP_PATH=%ASSEMBLY_PATH%.original"
 set "_MARKER_CHECK=%SCRIPT_DIR%shared\cecil-marker-check.ps1"
 set "MODS_TXT=!UE4_BINARIES_DIR!\Mods\mods.txt"
 set "_MODS_TMP=%TEMP%\cul-modstxt-%RANDOM%-%RANDOM%.txt"
+:: Not used by this mod. Set blank so a value another mod's wrapper left in
+:: the same console does not reach the body.
+set "MOD_LEFTOVERS="
+set "ROOT_EXTRAS="
+set "USER_FOLDER_EXTRAS="
+set "SHIM_MARKER="
+set "SHIM_MARKER_ALT="
+set "ASI_SUBDIR="
 :: --- END CONFIG BLOCK ---
 
 :: Pin delayed expansion off before `%*` is expanded on the `call` below.

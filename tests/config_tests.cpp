@@ -1,7 +1,7 @@
 // CameraUnlock.ini against the table: the committed CameraUnlock.ini is the table's fresh render
 // byte for byte, the owner creates exactly those bytes, each toggle's save changes the lines of
 // its own rows and no other byte, and the axis conversion the position processor is handed is
-// the one every earlier build shipped. `--render-config <path>` writes the fresh render to
+// the one cc165ee handed it. `--render-config <path>` writes the fresh render to
 // <path> instead and runs nothing else (pixi run render-config).
 //
 // Every owner here reads and creates a scratch Defaults.ini, never the player's own.
@@ -16,6 +16,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <stdexcept>
@@ -52,16 +53,20 @@ std::string FreshRender() {
     return cfg::RenderCanonicalFresh(headtracking::ConfigTable(), cfg::RenderHeader{headtracking::kGameDisplayName});
 }
 
-// A fresh folder in %TEMP%, ending in a separator, with Defaults.ini in a folder of its own.
+std::wstring ScratchRoot() {
+    wchar_t temp[MAX_PATH];
+    GetTempPathW(MAX_PATH, temp);
+    return std::wstring(temp) + L"titanfall2-config-tests-" + std::to_wstring(GetCurrentProcessId());
+}
+
+// A fresh folder under ScratchRoot, ending in a separator, with Defaults.ini in a folder of its own.
 struct Scratch {
     std::wstring folder;
     std::wstring defaults;
 };
 
 Scratch MakeScratch(const wchar_t* name) {
-    wchar_t temp[MAX_PATH];
-    GetTempPathW(MAX_PATH, temp);
-    const std::wstring root = std::wstring(temp) + L"titanfall2-config-tests-" + std::to_wstring(GetCurrentProcessId());
+    const std::wstring root = ScratchRoot();
     CreateDirectoryW(root.c_str(), nullptr);
     const std::wstring dir = root + L"\\" + name;
     if (!CreateDirectoryW(dir.c_str(), nullptr)) throw std::runtime_error("cannot create a scratch folder");
@@ -180,10 +185,12 @@ void TogglesSaveTheirRowsOnly() {
     Check(!reread.config.rotation_enabled && reread.config.position_enabled, "the mode survives a restart");
 }
 
-// The settings every earlier build handed the position processor with the file it shipped:
-// ApplyPositionConfig at cc165ee on [Position] SensX/Y/Z=1, InvertX=true, InvertY=false,
-// InvertZ=true, LimitY copied into both vertical limits and LimitZ and LimitZBack swapped.
-cameraunlock::PositionSettings Published(float x, float y, float z, float zBack) {
+// The settings cc165ee's ApplyPositionConfig handed the position processor with the file it
+// shipped: [Position] SensX/Y/Z=1, InvertX=true, InvertY=false, InvertZ=true, LimitY copied into
+// both vertical limits and LimitZ and LimitZBack swapped. d366649, the published dev build, left
+// limit_y_down at 0.20 whatever LimitY said, so it agrees at the defaults and not once LimitY
+// moves; the differential test lists that difference.
+cameraunlock::PositionSettings BeforeConversion(float x, float y, float z, float zBack) {
     cameraunlock::PositionSettings ps;
     ps.sensitivity_x = 1.0f;
     ps.sensitivity_y = 1.0f;
@@ -213,10 +220,10 @@ bool SameAxisConversion(const cameraunlock::PositionSettings& a, const cameraunl
            a.invert_y == b.invert_y && a.invert_z == b.invert_z;
 }
 
-void AxisConversionIsThePublishedOne() {
-    std::printf("the position processor gets the axis conversion every earlier build shipped\n");
+void AxisConversionIsCc165ees() {
+    std::printf("the position processor gets the axis conversion cc165ee gave it\n");
     const Config defaults = headtracking::ConfigTable().defaults();
-    Check(SameAxisConversion(headtracking::PositionSettingsFor(defaults), Published(0.30f, 0.20f, 0.40f, 0.10f)),
+    Check(SameAxisConversion(headtracking::PositionSettingsFor(defaults), BeforeConversion(0.30f, 0.20f, 0.40f, 0.10f)),
           "at the defaults");
     Check(defaults.position.limit_z > defaults.position.limit_z_back, "more room to lean in than to pull back");
 
@@ -226,7 +233,7 @@ void AxisConversionIsThePublishedOne() {
     leaned.position.limit_y_down = 0.25f;
     leaned.position.limit_z = 0.6f;
     leaned.position.limit_z_back = 0.05f;
-    Check(SameAxisConversion(headtracking::PositionSettingsFor(leaned), Published(0.5f, 0.25f, 0.6f, 0.05f)),
+    Check(SameAxisConversion(headtracking::PositionSettingsFor(leaned), BeforeConversion(0.5f, 0.25f, 0.6f, 0.05f)),
           "with every limit moved");
 }
 
@@ -246,7 +253,8 @@ int main(int argc, char** argv) {
         EveryHotkeyDefaultParses();
         FirstLaunchCreatesTheCommittedFile();
         TogglesSaveTheirRowsOnly();
-        AxisConversionIsThePublishedOne();
+        AxisConversionIsCc165ees();
+        std::filesystem::remove_all(ScratchRoot());
     } catch (const std::exception& e) {
         std::printf("FAIL: %s\n", e.what());
         return 1;

@@ -2,13 +2,15 @@
 //
 //   oracle     d366649's reader (oracle/), the rolling dev pre-release and the only published
 //              build, and d366649's startup code
-//   import     the frozen reader in src/legacy_config/, and the startup code it runs under
+//   import     the frozen reader in src/legacy_config/, and cc165ee's startup code, which
+//              commit A did not change
 //   migration  the config owner importing the input, as HeadTracking.ini, into a new
 //              CameraUnlock.ini beside it, then the canonical reader and table on the result,
 //              and the startup code of this build
 //
 // Comparison 1, oracle against import, finds what a player updating from the dev build sees
-// change that the conversion did not cause. Every difference it may find is listed in
+// change that the conversion did not cause: every field the two Configs share, and what each
+// build's own startup code does with its Config. Every difference it may find is listed in
 // kComparisonOneDifferences with the commit that made it; any other fails the test.
 //
 // Comparison 2, import against migration, is the proof for the migration: no difference but
@@ -16,7 +18,7 @@
 // unit scale or axis inversion the player set away from what the build shipped is dropped
 // (pose_shaping); the shipped WorldScale is kSourceUnitsPerMetre and the shipped InvertX=true
 // and InvertZ=true are the inversions PositionSettingsFor hands the processor, which
-// config_tests holds against the published settings. MoveCrosshair=false is dropped (reticle):
+// config_tests holds against cc165ee's. MoveCrosshair=false is dropped (reticle):
 // the crosshair always follows the aim. A hotkey code outside 0x01-0xFE imports as unbound
 // (N1). No default moved, so the no-file input has no difference either. The frozen reader
 // clamps every number it reads into a range the canonical rows hold and replaces a value that
@@ -278,6 +280,171 @@ std::vector<std::string> SharedFieldDifferences(const A& a, const B& b) {
     return out;
 }
 
+// What the mod starts with: every setting Plugin::Initialize and HotkeyHandler::Start take from
+// the Config, floats as their bits.
+struct Startup {
+    int port = 0;
+    bool enabled = false;
+    TrackingMode mode = TrackingMode::RotationAndPosition;
+    bool world_yaw = false;
+    uint32_t local_smoothing = 0;
+    uint32_t remote_smoothing = 0;
+    // The rotation processor's sensitivity and deadzone.
+    uint32_t sens_yaw = 0, sens_pitch = 0, sens_roll = 0;
+    bool invert_yaw = false, invert_pitch = false, invert_roll = false;
+    uint32_t deadzone_yaw = 0, deadzone_pitch = 0, deadzone_roll = 0;
+    // What the position processor is handed, less the smoothing the session overwrites.
+    uint32_t pos_sens_x = 0, pos_sens_y = 0, pos_sens_z = 0;
+    bool pos_invert_x = false, pos_invert_y = false, pos_invert_z = false;
+    uint32_t limit_x = 0, limit_y = 0, limit_y_down = 0, limit_z = 0, limit_z_back = 0;
+    // Source units per metre the lean is multiplied by.
+    uint32_t world_scale = 0;
+    uint32_t fov_override = 0;
+    uint32_t cull_fov_scale = 0;
+    bool log_to_file = false;
+    bool dump_view_setup = false;
+    // Whether the crosshair and hit indicator hooks are installed.
+    bool crosshair = false;
+    std::vector<Registration> hotkeys;
+};
+
+void SetRotation(Startup& s, const cameraunlock::SensitivitySettings& r, const cameraunlock::DeadzoneSettings& d) {
+    s.sens_yaw = Bits(r.yaw);
+    s.sens_pitch = Bits(r.pitch);
+    s.sens_roll = Bits(r.roll);
+    s.invert_yaw = r.invert_yaw;
+    s.invert_pitch = r.invert_pitch;
+    s.invert_roll = r.invert_roll;
+    s.deadzone_yaw = Bits(d.yaw);
+    s.deadzone_pitch = Bits(d.pitch);
+    s.deadzone_roll = Bits(d.roll);
+}
+
+void SetPosition(Startup& s, const cameraunlock::PositionSettings& p) {
+    s.pos_sens_x = Bits(p.sensitivity_x);
+    s.pos_sens_y = Bits(p.sensitivity_y);
+    s.pos_sens_z = Bits(p.sensitivity_z);
+    s.pos_invert_x = p.invert_x;
+    s.pos_invert_y = p.invert_y;
+    s.pos_invert_z = p.invert_z;
+    s.limit_x = Bits(p.limit_x);
+    s.limit_y = Bits(p.limit_y);
+    s.limit_y_down = Bits(p.limit_y_down);
+    s.limit_z = Bits(p.limit_z);
+    s.limit_z_back = Bits(p.limit_z_back);
+}
+
+std::vector<std::string> StartupDifferences(const Startup& a, const Startup& b) {
+    std::vector<std::string> out;
+#define SAME(f) \
+    if (a.f != b.f) out.push_back(#f)
+    SAME(port);
+    SAME(enabled);
+    SAME(mode);
+    SAME(world_yaw);
+    SAME(local_smoothing);
+    SAME(remote_smoothing);
+    SAME(sens_yaw);
+    SAME(sens_pitch);
+    SAME(sens_roll);
+    SAME(invert_yaw);
+    SAME(invert_pitch);
+    SAME(invert_roll);
+    SAME(deadzone_yaw);
+    SAME(deadzone_pitch);
+    SAME(deadzone_roll);
+    SAME(pos_sens_x);
+    SAME(pos_sens_y);
+    SAME(pos_sens_z);
+    SAME(pos_invert_x);
+    SAME(pos_invert_y);
+    SAME(pos_invert_z);
+    SAME(limit_x);
+    SAME(limit_y);
+    SAME(limit_y_down);
+    SAME(limit_z);
+    SAME(limit_z_back);
+    SAME(world_scale);
+    SAME(fov_override);
+    SAME(cull_fov_scale);
+    SAME(log_to_file);
+    SAME(dump_view_setup);
+    SAME(crosshair);
+#undef SAME
+    if (a.hotkeys != b.hotkeys) out.push_back("hotkeys " + Describe(a.hotkeys) + " against " + Describe(b.hotkeys));
+    return out;
+}
+
+// PositionSettings::limit_y_down at core 0f7a634, the core d366649 was built against.
+constexpr float kPublishedLimitYDown = 0.20f;
+
+// Plugin::Initialize as d366649 and cc165ee both ran it on their own Config, less the vertical
+// limit below it and the hotkeys, which the two builds set differently.
+template <class C>
+Startup SharedStartup(const C& c) {
+    Startup s;
+    s.port = c.port;
+    s.enabled = c.enabled_on_startup;
+    s.mode = c.pos_enabled ? TrackingMode::RotationAndPosition : TrackingMode::RotationOnly;
+    s.world_yaw = c.world_space_yaw;
+    s.local_smoothing = Bits(c.local_smoothing);
+    s.remote_smoothing = Bits(c.remote_smoothing);
+
+    cameraunlock::SensitivitySettings r;
+    r.yaw = c.sens_yaw;
+    r.pitch = c.sens_pitch;
+    r.roll = c.sens_roll;
+    r.invert_yaw = c.invert_yaw;
+    r.invert_pitch = c.invert_pitch;
+    r.invert_roll = c.invert_roll;
+    cameraunlock::DeadzoneSettings z;
+    z.yaw = c.deadzone_yaw;
+    z.pitch = c.deadzone_pitch;
+    z.roll = c.deadzone_roll;
+    SetRotation(s, r, z);
+
+    // ApplyPositionConfig: the Z bounds swapped.
+    cameraunlock::PositionSettings p;
+    p.sensitivity_x = c.pos_sens_x;
+    p.sensitivity_y = c.pos_sens_y;
+    p.sensitivity_z = c.pos_sens_z;
+    p.invert_x = c.pos_invert_x;
+    p.invert_y = c.pos_invert_y;
+    p.invert_z = c.pos_invert_z;
+    p.limit_x = c.pos_limit_x;
+    p.limit_y = c.pos_limit_y;
+    p.limit_z = c.pos_limit_z_back;
+    p.limit_z_back = c.pos_limit_z;
+    SetPosition(s, p);
+    s.world_scale = Bits(c.pos_world_scale);
+
+    s.fov_override = Bits(c.fov_override_degrees);
+    s.cull_fov_scale = Bits(c.cull_fov_scale);
+    s.log_to_file = c.log_to_file;
+    s.dump_view_setup = c.dump_view_setup;
+    s.crosshair = c.move_crosshair;
+    return s;
+}
+
+// d366649, the published dev build: limit_y_down left at core's default whatever LimitY said,
+// and the registrations less the ADS cycle, which comparison 1 lists on its own.
+Startup FromOracle(const oracle::Config& c) {
+    Startup s = SharedStartup(c);
+    s.limit_y_down = Bits(kPublishedLimitYDown);
+    for (const Registration& r : OracleHotkeys(c)) {
+        if (r.action != Action::AdsMode) s.hotkeys.push_back(r);
+    }
+    return s;
+}
+
+// cc165ee, the build the frozen reader was taken from: LimitY copied into both vertical limits.
+Startup FromImportBuild(const legacy::Config& c) {
+    Startup s = SharedStartup(c);
+    s.limit_y_down = Bits(c.pos_limit_y);
+    s.hotkeys = ImportHotkeys(c);
+    return s;
+}
+
 // ---------------------------------------------------------------------------
 // Comparison 1: d366649 against the frozen reader
 // ---------------------------------------------------------------------------
@@ -297,6 +464,9 @@ ListedDifference kComparisonOneDifferences[] = {
      "case, and the lean eases out while they are up"},
     {"ads-key", "ea74da9",
      "[Hotkeys] AdsMode is no longer read, and neither it nor Ctrl+Shift+U cycles an ADS mode"},
+    {"limit-y-down", "0859563",
+     "[Position] LimitY limits leaning down as well as up; d366649 held leaning down to 0.20 m "
+     "whatever LimitY said"},
 };
 
 ListedDifference& Listed(const char* id) {
@@ -311,6 +481,7 @@ struct ImportRun {
     legacy::Config cfg;
 };
 
+// The two Configs field by field, then each carried through its own build's startup.
 void CompareOracleWithImport(const std::string& name, const oracle::Config& o, const ImportRun& i) {
     for (const std::string& field : SharedFieldDifferences(o, i.cfg)) {
         Fail(name, "comparison 1: " + field + " differs from d366649 with no listed reason");
@@ -319,15 +490,12 @@ void CompareOracleWithImport(const std::string& name, const oracle::Config& o, c
     if (o.ads_mode != oracle::kDefaultAdsMode) ++Listed("ads-mode").seen;
     ++Listed("ads-key").seen;
 
-    // d366649's registrations less the ADS cycle give the import's.
-    std::vector<Registration> expected;
-    for (const Registration& r : OracleHotkeys(o)) {
-        if (r.action != Action::AdsMode) expected.push_back(r);
-    }
-    const std::vector<Registration> actual = ImportHotkeys(i.cfg);
-    if (expected != actual) {
-        Fail(name, "comparison 1: hotkeys " + Describe(actual) + ", d366649 less the listed differences " +
-                       Describe(expected));
+    for (const std::string& d : StartupDifferences(FromOracle(o), FromImportBuild(i.cfg))) {
+        if (d == "limit_y_down") {
+            ++Listed("limit-y-down").seen;
+            continue;
+        }
+        Fail(name, "comparison 1: the start differs from d366649's in " + d + " with no listed reason");
     }
 }
 
@@ -393,60 +561,6 @@ std::vector<MutationKey> CorpusKeys() {
 // Comparison 2: the frozen reader against the migration
 // ---------------------------------------------------------------------------
 
-// What the mod starts with: every setting Plugin::Initialize and HotkeyHandler::Start take from
-// the Config, floats as their bits.
-struct Startup {
-    int port = 0;
-    bool enabled = false;
-    TrackingMode mode = TrackingMode::RotationAndPosition;
-    bool world_yaw = false;
-    uint32_t local_smoothing = 0;
-    uint32_t remote_smoothing = 0;
-    // The rotation processor's sensitivity and deadzone.
-    uint32_t sens_yaw = 0, sens_pitch = 0, sens_roll = 0;
-    bool invert_yaw = false, invert_pitch = false, invert_roll = false;
-    uint32_t deadzone_yaw = 0, deadzone_pitch = 0, deadzone_roll = 0;
-    // What the position processor is handed, less the smoothing the session overwrites.
-    uint32_t pos_sens_x = 0, pos_sens_y = 0, pos_sens_z = 0;
-    bool pos_invert_x = false, pos_invert_y = false, pos_invert_z = false;
-    uint32_t limit_x = 0, limit_y = 0, limit_y_down = 0, limit_z = 0, limit_z_back = 0;
-    // Source units per metre the lean is multiplied by.
-    uint32_t world_scale = 0;
-    uint32_t fov_override = 0;
-    uint32_t cull_fov_scale = 0;
-    bool log_to_file = false;
-    bool dump_view_setup = false;
-    // Whether the crosshair and hit indicator hooks are installed.
-    bool crosshair = false;
-    std::vector<Registration> hotkeys;
-};
-
-void SetRotation(Startup& s, const cameraunlock::SensitivitySettings& r, const cameraunlock::DeadzoneSettings& d) {
-    s.sens_yaw = Bits(r.yaw);
-    s.sens_pitch = Bits(r.pitch);
-    s.sens_roll = Bits(r.roll);
-    s.invert_yaw = r.invert_yaw;
-    s.invert_pitch = r.invert_pitch;
-    s.invert_roll = r.invert_roll;
-    s.deadzone_yaw = Bits(d.yaw);
-    s.deadzone_pitch = Bits(d.pitch);
-    s.deadzone_roll = Bits(d.roll);
-}
-
-void SetPosition(Startup& s, const cameraunlock::PositionSettings& p) {
-    s.pos_sens_x = Bits(p.sensitivity_x);
-    s.pos_sens_y = Bits(p.sensitivity_y);
-    s.pos_sens_z = Bits(p.sensitivity_z);
-    s.pos_invert_x = p.invert_x;
-    s.pos_invert_y = p.invert_y;
-    s.pos_invert_z = p.invert_z;
-    s.limit_x = Bits(p.limit_x);
-    s.limit_y = Bits(p.limit_y);
-    s.limit_y_down = Bits(p.limit_y_down);
-    s.limit_z = Bits(p.limit_z);
-    s.limit_z_back = Bits(p.limit_z_back);
-}
-
 const cfg::DroppedValue* FindDrop(const std::vector<cfg::DroppedValue>& dropped, cfg::DropRule rule,
                                   const char* section, const char* key) {
     for (const cfg::DroppedValue& d : dropped) {
@@ -465,11 +579,8 @@ bool KeyKept(const std::string& name, int vk, const char* key, const std::vector
     return vk != 0 && !outOfRange;
 }
 
-// Plugin::Initialize and HotkeyHandler::Start as commit A ran them on the frozen reader's
-// Config (ApplyRotationConfig, ApplyPositionConfig with LimitY copied into both vertical
-// limits and the Z bounds swapped, the world scale, [Position] Enabled choosing between the
-// first two modes, the crosshair hooks behind MoveCrosshair), with the approved drops the
-// import recorded applied: a dropped pose-shaping value runs as it shipped, a dropped
+// FromImportBuild, which commit A did not change, on the frozen reader's Config with the approved
+// drops the import recorded applied: a dropped pose-shaping value runs as it shipped, a dropped
 // MoveCrosshair=false as the crosshair following the aim, and a code N1 unbinds registers
 // nothing.
 Startup FromImport(const std::string& name, const legacy::Config& c, const std::vector<cfg::DroppedValue>& dropped) {
@@ -478,56 +589,37 @@ Startup FromImport(const std::string& name, const legacy::Config& c, const std::
         return FindDrop(dropped, cfg::DropRule::PoseShaping, section, key) != nullptr;
     };
 
-    Startup s;
-    s.port = c.port;
-    s.enabled = c.enabled_on_startup;
-    s.mode = c.pos_enabled ? TrackingMode::RotationAndPosition : TrackingMode::RotationOnly;
-    s.world_yaw = c.world_space_yaw;
-    s.local_smoothing = Bits(c.local_smoothing);
-    s.remote_smoothing = Bits(c.remote_smoothing);
+    legacy::Config run = c;
+    if (shaped("Sensitivity", "Yaw")) run.sens_yaw = d::kSensitivity;
+    if (shaped("Sensitivity", "Pitch")) run.sens_pitch = d::kSensitivity;
+    if (shaped("Sensitivity", "Roll")) run.sens_roll = d::kSensitivity;
+    if (shaped("Sensitivity", "InvertYaw")) run.invert_yaw = d::kInvert;
+    if (shaped("Sensitivity", "InvertPitch")) run.invert_pitch = d::kInvert;
+    if (shaped("Sensitivity", "InvertRoll")) run.invert_roll = d::kInvert;
+    if (shaped("Deadzone", "Yaw")) run.deadzone_yaw = d::kDeadzone;
+    if (shaped("Deadzone", "Pitch")) run.deadzone_pitch = d::kDeadzone;
+    if (shaped("Deadzone", "Roll")) run.deadzone_roll = d::kDeadzone;
+    if (shaped("Position", "SensX")) run.pos_sens_x = d::kPositionSensitivity;
+    if (shaped("Position", "SensY")) run.pos_sens_y = d::kPositionSensitivity;
+    if (shaped("Position", "SensZ")) run.pos_sens_z = d::kPositionSensitivity;
+    if (shaped("Position", "InvertX")) run.pos_invert_x = d::kPositionInvertX;
+    if (shaped("Position", "InvertY")) run.pos_invert_y = d::kPositionInvertY;
+    if (shaped("Position", "InvertZ")) run.pos_invert_z = d::kPositionInvertZ;
+    if (shaped("Position", "WorldScale")) run.pos_world_scale = d::kWorldScale;
+    if (FindDrop(dropped, cfg::DropRule::Reticle, "View", "MoveCrosshair") != nullptr) run.move_crosshair = true;
 
-    cameraunlock::SensitivitySettings r;
-    r.yaw = shaped("Sensitivity", "Yaw") ? d::kSensitivity : c.sens_yaw;
-    r.pitch = shaped("Sensitivity", "Pitch") ? d::kSensitivity : c.sens_pitch;
-    r.roll = shaped("Sensitivity", "Roll") ? d::kSensitivity : c.sens_roll;
-    r.invert_yaw = shaped("Sensitivity", "InvertYaw") ? d::kInvert : c.invert_yaw;
-    r.invert_pitch = shaped("Sensitivity", "InvertPitch") ? d::kInvert : c.invert_pitch;
-    r.invert_roll = shaped("Sensitivity", "InvertRoll") ? d::kInvert : c.invert_roll;
-    cameraunlock::DeadzoneSettings z;
-    z.yaw = shaped("Deadzone", "Yaw") ? d::kDeadzone : c.deadzone_yaw;
-    z.pitch = shaped("Deadzone", "Pitch") ? d::kDeadzone : c.deadzone_pitch;
-    z.roll = shaped("Deadzone", "Roll") ? d::kDeadzone : c.deadzone_roll;
-    SetRotation(s, r, z);
-
-    cameraunlock::PositionSettings p;
-    p.sensitivity_x = shaped("Position", "SensX") ? d::kPositionSensitivity : c.pos_sens_x;
-    p.sensitivity_y = shaped("Position", "SensY") ? d::kPositionSensitivity : c.pos_sens_y;
-    p.sensitivity_z = shaped("Position", "SensZ") ? d::kPositionSensitivity : c.pos_sens_z;
-    p.invert_x = shaped("Position", "InvertX") ? d::kPositionInvertX : c.pos_invert_x;
-    p.invert_y = shaped("Position", "InvertY") ? d::kPositionInvertY : c.pos_invert_y;
-    p.invert_z = shaped("Position", "InvertZ") ? d::kPositionInvertZ : c.pos_invert_z;
-    p.limit_x = c.pos_limit_x;
-    p.limit_y = c.pos_limit_y;
-    p.limit_y_down = c.pos_limit_y;
-    p.limit_z = c.pos_limit_z_back;
-    p.limit_z_back = c.pos_limit_z;
-    SetPosition(s, p);
-    s.world_scale = Bits(shaped("Position", "WorldScale") ? d::kWorldScale : c.pos_world_scale);
-
-    s.fov_override = Bits(c.fov_override_degrees);
-    s.cull_fov_scale = Bits(c.cull_fov_scale);
-    s.log_to_file = c.log_to_file;
-    s.dump_view_setup = c.dump_view_setup;
-    s.crosshair = c.move_crosshair || FindDrop(dropped, cfg::DropRule::Reticle, "View", "MoveCrosshair") != nullptr;
-
+    Startup s = FromImportBuild(run);
     const bool toggleKept = KeyKept(name, c.toggle_vk, "Toggle", dropped);
     const bool cycleKept = KeyKept(name, c.mode_cycle_vk, "ModeCycle", dropped);
     const bool yawKept = KeyKept(name, c.yaw_mode_vk, "YawMode", dropped);
-    for (const Registration& reg : ImportHotkeys(c)) {
-        const bool kept = reg.modifiers == kChord || (reg.action == Action::Toggle && toggleKept) ||
-                          (reg.action == Action::CycleMode && cycleKept) || (reg.action == Action::YawMode && yawKept);
-        if (kept) s.hotkeys.push_back(reg);
+    std::vector<Registration> kept;
+    for (const Registration& reg : s.hotkeys) {
+        if (reg.modifiers == kChord || (reg.action == Action::Toggle && toggleKept) ||
+            (reg.action == Action::CycleMode && cycleKept) || (reg.action == Action::YawMode && yawKept)) {
+            kept.push_back(reg);
+        }
     }
+    s.hotkeys = kept;
     return s;
 }
 
@@ -563,47 +655,6 @@ Startup FromMigration(const Config& c) {
     }
     std::sort(s.hotkeys.begin(), s.hotkeys.end());
     return s;
-}
-
-std::vector<std::string> StartupDifferences(const Startup& a, const Startup& b) {
-    std::vector<std::string> out;
-#define SAME(f) \
-    if (a.f != b.f) out.push_back(#f)
-    SAME(port);
-    SAME(enabled);
-    SAME(mode);
-    SAME(world_yaw);
-    SAME(local_smoothing);
-    SAME(remote_smoothing);
-    SAME(sens_yaw);
-    SAME(sens_pitch);
-    SAME(sens_roll);
-    SAME(invert_yaw);
-    SAME(invert_pitch);
-    SAME(invert_roll);
-    SAME(deadzone_yaw);
-    SAME(deadzone_pitch);
-    SAME(deadzone_roll);
-    SAME(pos_sens_x);
-    SAME(pos_sens_y);
-    SAME(pos_sens_z);
-    SAME(pos_invert_x);
-    SAME(pos_invert_y);
-    SAME(pos_invert_z);
-    SAME(limit_x);
-    SAME(limit_y);
-    SAME(limit_y_down);
-    SAME(limit_z);
-    SAME(limit_z_back);
-    SAME(world_scale);
-    SAME(fov_override);
-    SAME(cull_fov_scale);
-    SAME(log_to_file);
-    SAME(dump_view_setup);
-    SAME(crosshair);
-#undef SAME
-    if (a.hotkeys != b.hotkeys) out.push_back("hotkeys " + Describe(a.hotkeys) + " against " + Describe(b.hotkeys));
-    return out;
 }
 
 // Every pose-shaping value the frozen reader read is listed in its place, folded where it holds

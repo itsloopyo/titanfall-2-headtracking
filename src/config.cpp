@@ -125,7 +125,8 @@ cfg::ImportResult MapLegacyConfig(legacy::ReadStatus status, const legacy::Confi
     out.rotation_enabled = mode.rotation_enabled;
     out.position_enabled = mode.position_enabled;
 
-    // LimitY bounded both directions, so it becomes both explicit values.
+    // The build the frozen reader comes from applied LimitY in both directions, so it becomes both
+    // explicit values.
     out.position.limit_x = read.pos_limit_x;
     out.position.limit_y = read.pos_limit_y;
     out.position.limit_y_down = read.pos_limit_y;

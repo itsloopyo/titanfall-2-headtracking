@@ -26,7 +26,6 @@
 #include "projection.h"
 #include "rui_transform.h"
 #include "angle_units.h"
-#include "config.h"
 #include "fov_control.h"
 #include "source_angles.h"
 #include "view_matrix.h"
@@ -380,90 +379,6 @@ void TestMulMat4Order() {
     CHECK_NEAR(out[0], 7.0f, 1e-5f);
     // out[0][1] = a[0][0]*b[0][1] + a[0][1]*b[1][1] = 0 + 2*1 = 2
     CHECK_NEAR(out[1], 2.0f, 1e-5f);
-}
-
-// ---- config defaults -------------------------------------------------------
-//
-// Every numeric key is read as "clamp into range, falling back on the default
-// if it is not a number", so a default that sits OUTSIDE its own range would be
-// silently altered on the way in. The INI a user is handed would then document
-// one value while the loader used another, and the two would only disagree for
-// the user who deleted the key - which is the hardest version of this bug to
-// hear about. These are not compiler tautologies: they are the invariant that
-// makes the defaults and the limits one coherent set.
-void TestDefaultsAreWithinLimits() {
-    using namespace headtracking::defaults;
-    using namespace headtracking::limits;
-
-    CHECK(kPort >= kMinPort && kPort <= kMaxPort);
-
-    CHECK(kSensitivity >= kMinSensitivity && kSensitivity <= kMaxSensitivity);
-
-    CHECK(kLocalSmoothing >= 0.0f && kLocalSmoothing <= kMaxSmoothing);
-    CHECK(kRemoteSmoothing >= 0.0f && kRemoteSmoothing <= kMaxSmoothing);
-
-    CHECK(kPositionSensitivity >= kMinPositionSensitivity
-          && kPositionSensitivity <= kMaxPositionSensitivity);
-
-    CHECK(kLimitX >= kMinPositionLimit && kLimitX <= kMaxPositionLimit);
-    CHECK(kLimitY >= kMinPositionLimit && kLimitY <= kMaxPositionLimit);
-    CHECK(kLimitZ >= kMinPositionLimit && kLimitZ <= kMaxPositionLimit);
-    CHECK(kLimitZBack >= kMinPositionLimit && kLimitZBack <= kMaxPositionLimit);
-
-    CHECK(kWorldScale >= kMinWorldScale && kWorldScale <= kMaxWorldScale);
-    CHECK(kCullFovScale >= kMinCullFovScale && kCullFovScale <= kMaxCullFovScale);
-
-    // Deadzone is read as "positive or nothing", so its default has to be the
-    // nothing.
-    CHECK(kDeadzone == 0.0f);
-    // FieldOfView 0 is the sentinel for "follow the game's own slider"; any
-    // positive default would silently override it instead.
-    CHECK(kFieldOfView == 0.0f);
-}
-
-// The asymmetric Z envelope is a domain rule, not a coincidence: more room to
-// lean IN than to pull back, so the camera does not clip through the player.
-// See the position-tracking section of AGENTS.md.
-void TestDefaultPositionEnvelope() {
-    using namespace headtracking::defaults;
-    CHECK(kLimitZ > kLimitZBack);
-}
-
-// A default-constructed Config is what a user gets when the INI cannot be
-// opened at all, so it has to be the same configuration a freshly written INI
-// describes.
-void TestDefaultConfigMatchesConstants() {
-    const headtracking::Config c;
-    using namespace headtracking::defaults;
-
-    CHECK(c.port == kPort);
-    CHECK(c.enabled_on_startup == kEnableOnStartup);
-    CHECK_NEAR(c.sens_yaw, kSensitivity, 0.0f);
-    CHECK_NEAR(c.sens_pitch, kSensitivity, 0.0f);
-    CHECK_NEAR(c.sens_roll, kSensitivity, 0.0f);
-    CHECK_NEAR(c.local_smoothing, kLocalSmoothing, 0.0f);
-    CHECK_NEAR(c.remote_smoothing, kRemoteSmoothing, 0.0f);
-    CHECK_NEAR(c.pos_limit_x, kLimitX, 0.0f);
-    CHECK_NEAR(c.pos_limit_y, kLimitY, 0.0f);
-    CHECK_NEAR(c.pos_limit_z, kLimitZ, 0.0f);
-    CHECK_NEAR(c.pos_limit_z_back, kLimitZBack, 0.0f);
-    CHECK_NEAR(c.pos_world_scale, kWorldScale, 0.0f);
-    CHECK_NEAR(c.cull_fov_scale, kCullFovScale, 0.0f);
-    CHECK(c.toggle_vk == kToggleVk);
-    CHECK(c.yaw_mode_vk == kYawModeVk);
-    CHECK(c.mode_cycle_vk == kModeCycleVk);
-    CHECK(c.world_space_yaw == kWorldSpaceYaw);
-}
-
-// The nav-cluster hotkeys must stay distinct, or one action becomes
-// unreachable and the collision is invisible until someone presses the key.
-void TestHotkeyDefaultsAreDistinct() {
-    using namespace headtracking::defaults;
-    const int keys[] = { kToggleVk, kYawModeVk, kModeCycleVk };
-    constexpr int n = static_cast<int>(sizeof(keys) / sizeof(keys[0]));
-    for (int i = 0; i < n; ++i) {
-        for (int j = i + 1; j < n; ++j) CHECK(keys[i] != keys[j]);
-    }
 }
 
 // ---- fov_control -----------------------------------------------------------
@@ -963,10 +878,6 @@ int main() {
     TestMulMat4Identity();
     TestMulMat4Aliasing();
     TestMulMat4Order();
-    TestDefaultsAreWithinLimits();
-    TestDefaultPositionEnvelope();
-    TestDefaultConfigMatchesConstants();
-    TestHotkeyDefaultsAreDistinct();
     TestFovTangentConversion();
     TestFovScaleIsLinearInDegrees();
     TestPlausibleScale();

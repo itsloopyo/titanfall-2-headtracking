@@ -5,13 +5,15 @@
 namespace headtracking {
 
 class Plugin;
+struct Config;
 
 class HotkeyHandler {
 public:
-    // Starts the poller thread. There is no matching Stop: the plugin that owns
-    // this is deliberately leaked (see plugin.cpp), so the poller runs until the
-    // process exits.
-    void Start(Plugin& plugin, int toggle_vk, int yaw_mode_vk, int mode_cycle_vk);
+    // Registers the key lists CameraUnlock.ini holds for each action, the
+    // Ctrl+Shift chords among them, and starts the poller thread. There is no
+    // matching Stop: the plugin that owns this is deliberately leaked (see
+    // plugin.cpp), so the poller runs until the process exits.
+    void Start(Plugin& plugin, const Config& config);
 
 private:
     cameraunlock::input::HotkeyPoller m_poller;

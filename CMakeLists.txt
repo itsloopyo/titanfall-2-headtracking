@@ -104,12 +104,37 @@ set_target_properties(Titanfall2HeadTrackingTests PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
 )
 
+# The committed CameraUnlock.ini against the table, the toggles' saves and the axis
+# conversion the position processor is handed. `--render-config <path>` makes it write the
+# committed file instead (pixi run render-config).
+add_executable(Titanfall2ConfigTests
+    tests/config_tests.cpp
+    src/config.cpp
+    src/legacy_config/legacy_config.cpp
+)
+
+target_include_directories(Titanfall2ConfigTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_compile_definitions(Titanfall2ConfigTests PRIVATE
+    TITANFALL2_COMMITTED_CONFIG=L"${CMAKE_CURRENT_SOURCE_DIR}/CameraUnlock.ini"
+)
+
+target_link_libraries(Titanfall2ConfigTests PRIVATE cameraunlock)
+
+set_target_properties(Titanfall2ConfigTests PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+)
+
 # The config differential test: d366649's reader (the oracle, the dev pre-release), the
-# frozen reader in src/legacy_config and core's mutation corpus over the dev build's
-# first-run output. Built with the mod like the tests above; `pixi run test` runs it.
+# frozen reader in src/legacy_config, the owner's migration into CameraUnlock.ini, and core's
+# mutation corpus over the dev build's first-run output. Built with the mod like the tests
+# above; `pixi run test` runs it.
 add_executable(Titanfall2ConfigDifferential
     tests/config_differential/differential_tests.cpp
     tests/config_differential/oracle/oracle_config.cpp
+    src/config.cpp
     src/legacy_config/legacy_config.cpp
 )
 
@@ -121,6 +146,7 @@ target_include_directories(Titanfall2ConfigDifferential PRIVATE
 
 target_compile_definitions(Titanfall2ConfigDifferential PRIVATE
     TITANFALL2_DIFFERENTIAL_INPUTS="${CMAKE_CURRENT_SOURCE_DIR}/tests/config_differential/inputs"
+    TITANFALL2_COMMITTED_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/CameraUnlock.ini"
 )
 
 target_link_libraries(Titanfall2ConfigDifferential PRIVATE cameraunlock)

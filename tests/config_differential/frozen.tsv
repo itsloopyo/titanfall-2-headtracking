@@ -7,7 +7,8 @@
 # Published builds: only the rolling dev pre-release 0.0.0-nightly.20260830.d366649 at
 # d366649 (cameraunlock-core 0f7a634). No v* release.
 # The frozen reader is src/config.cpp's reading half as of cc165ee (cameraunlock-core
-# c480d8a; 10789ea from 351a742, which moved no source the reader compiles).
+# c480d8a; 10789ea from 351a742 and def74d7 from 5bf8ce2, neither of which moved a source the
+# reader compiles).
 #
 # path	sha256	what
 src/legacy_config/legacy_config.h	9cd372c9e9c989e0a0cbc66277c424e27dc9b4e96cd80f9c4eaa690aa0cc5077	the frozen reader

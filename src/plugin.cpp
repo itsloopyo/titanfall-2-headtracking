@@ -16,78 +16,10 @@
 #include "hit_indicator.h"
 #include "world_marker_hook.h"
 
+#include "cameraunlock/config/defaults_file.h"
+#include "cameraunlock/tracking/tracking_mode.h"
+
 namespace headtracking {
-
-namespace {
-
-void ApplyRotationConfig(cameraunlock::TrackingProcessor& processor, const Config& c) {
-    cameraunlock::SensitivitySettings s;
-    s.yaw = c.sens_yaw;
-    s.pitch = c.sens_pitch;
-    s.roll = c.sens_roll;
-    s.invert_yaw = c.invert_yaw;
-    s.invert_pitch = c.invert_pitch;
-    s.invert_roll = c.invert_roll;
-    processor.SetSensitivity(s);
-
-    cameraunlock::DeadzoneSettings d;
-    d.yaw = c.deadzone_yaw;
-    d.pitch = c.deadzone_pitch;
-    d.roll = c.deadzone_roll;
-    processor.SetDeadzone(d);
-}
-
-void ApplyPositionConfig(cameraunlock::PositionProcessor& processor, const Config& c) {
-    cameraunlock::PositionSettings ps;
-    ps.sensitivity_x = c.pos_sens_x;
-    ps.sensitivity_y = c.pos_sens_y;
-    ps.sensitivity_z = c.pos_sens_z;
-    // The user's Invert* preferences go to the processor, which applies them
-    // BEFORE its clamp - and that is the correct side, given the bound swap
-    // below. `InvertZ` exists for a tracker whose z runs the other way: with it
-    // set, the user's forward lean arrives as raw negative z, the processor
-    // flips it to positive, and the positive bound is the generous one. Both
-    // settings therefore put 0.40 m on the physical forward lean.
-    //
-    // Inverting AFTER the clamp instead (folding the sign into the world scale)
-    // is what recreates the trap the doctrine warns about: the raw sign is what
-    // the asymmetric bounds see, so `InvertZ=true` clamped the user's forward
-    // lean at 0.10 m and their backward lean at 0.40 m. The direction still
-    // looked right, only the travel was wrong, which is exactly why that shape
-    // survives testing.
-    ps.invert_x = c.pos_invert_x;
-    ps.invert_y = c.pos_invert_y;
-    ps.invert_z = c.pos_invert_z;
-    ps.limit_x = c.pos_limit_x;
-    // The clamp is [-limit_y_down, +limit_y] and limit_y_down carries its own
-    // default, so mirror the one configured vertical limit the way
-    // PositionSettings::Symmetric does. Left unset, raising LimitY widened the
-    // upward budget only and downward travel stayed pinned at 0.20m.
-    ps.limit_y = c.pos_limit_y;
-    ps.limit_y_down = c.pos_limit_y;
-    // The two cores disagree about which sign of z is "forward". C++ clamps
-    // z to [-limit_z, +limit_z_back]; the C# original it is a port of clamps to
-    // [-LimitZBack, +LimitZ]. Transposed, not mirrored - with the same settings
-    // one puts the generous allowance on negative z and the other on positive.
-    //
-    // Our tracker frame leans forward on POSITIVE z, so the generous allowance
-    // has to land on the positive bound, which means handing the C++ processor
-    // its two bounds the other way round. Deliberately not `invert_z`: that
-    // flips BEFORE the clamp, which would fix the direction and quietly leave
-    // the forward lean with the 0.10 m backward allowance.
-    //
-    // If the C++ core is ever reconciled with the C# original, this swap has to
-    // go with it. Verified in game: a 40 cm forward lean reaches the full
-    // 0.40 m (15.75 units), a 40 cm backward lean stops at 0.10 m (3.94).
-    ps.limit_z      = c.pos_limit_z_back;  // negative bound: leaning back
-    ps.limit_z_back = c.pos_limit_z;       // positive bound: leaning in
-    processor.SetSettings(ps);
-    // Our trackers report head position directly, so the core's synthetic
-    // pivot-forward term (which cancels a webcam pivot) only injects phantom
-    // rotation-coupled movement. Disable it.
-    processor.SetTrackerPivotForward(0.0f);
-}
-}  // namespace
 
 // Deliberately leaked, never destroyed. A function-local static would register
 // ~Plugin in the CRT's onexit table, and MSVC runs that table from
@@ -103,18 +35,42 @@ Plugin& GetPlugin() {
 Plugin::Plugin() = default;
 Plugin::~Plugin() = default;
 
-void Plugin::Initialize() {
-    m_config = Config::LoadOrCreateDefault();
-    SetVerboseLogging(m_config.log_to_file);
-    m_worldScale = m_config.pos_world_scale;
-    m_enabled.store(m_config.enabled_on_startup);
-    m_worldSpaceYaw.store(m_config.world_space_yaw);
-    m_session.SetMode(m_config.pos_enabled
-                          ? cameraunlock::TrackingMode::RotationAndPosition
-                          : cameraunlock::TrackingMode::RotationOnly);
+void Plugin::LoadConfig() {
+    namespace cfg = cameraunlock::config;
+    m_configOwner.emplace(ConfigOwnerOptionsFor(ConfigFolder(), cfg::DefaultsFile::PerUser()));
+    const cfg::ConfigLoadResult<Config> loaded = m_configOwner->Load();
+    for (const std::string& line : loaded.log) HT_LOG("[config] %s", line.c_str());
+    HT_LOG("[config] %s", cfg::ConfigLoadStatusName(loaded.status));
+    // Every status hands back the settings to run on.
+    m_config = loaded.config;
+}
 
-    ApplyRotationConfig(m_session.GetProcessor(), m_config);
-    ApplyPositionConfig(m_session.GetPositionProcessor(), m_config);
+void Plugin::SaveConfig(const std::function<void(Config&)>& change) {
+    namespace cfg = cameraunlock::config;
+    const cfg::ConfigSaveResult saved = m_configOwner->Save(change);
+    for (const std::string& line : saved.log) HT_LOG("[config] %s", line.c_str());
+    if (saved.status != cfg::ConfigSaveStatus::Saved) {
+        HT_LOG("[config] save %s: %s", cfg::ConfigSaveStatusName(saved.status), saved.reason.c_str());
+    }
+}
+
+void Plugin::Initialize() {
+    LoadConfig();
+    SetVerboseLogging(m_config.log_to_file);
+    m_enabled.store(m_config.enable_on_startup);
+    m_worldSpaceYaw.store(m_config.world_space_yaw);
+    // The table reads a pair that names no mode as its defaults, so every loaded pair decodes.
+    const cameraunlock::TrackingMode mode =
+        cameraunlock::DecodeTrackingMode(m_config.rotation_enabled, m_config.position_enabled).value();
+    m_session.SetMode(mode);
+    m_desiredMode.store(mode);
+
+    // The rotation processor keeps its identity sensitivity and no deadzone: the tracker
+    // shapes the pose. The position processor gets the axis conversion (PositionSettingsFor).
+    // Our trackers report head position directly, so the core's synthetic pivot-forward term
+    // (which cancels a webcam pivot) only injects phantom rotation-coupled movement. Disable it.
+    m_session.GetPositionProcessor().SetSettings(PositionSettingsFor(m_config));
+    m_session.GetPositionProcessor().SetTrackerPivotForward(0.0f);
     // Both smoothing parameters cover rotation and position; the session picks
     // between them per connection from the receiver's source-address check, so
     // a switch from a local OpenTrack instance to a phone on WiFi mid-session
@@ -125,10 +81,11 @@ void Plugin::Initialize() {
     m_receiver.SetLog([](const std::string& msg) {
         HT_LOG("[receiver] %s", msg.c_str());
     });
-    if (m_receiver.Start(m_config.port)) {
-        HT_LOG("[plugin] listening on UDP %u", m_config.port);
+    const auto port = static_cast<uint16_t>(m_config.udp_port);
+    if (m_receiver.Start(port)) {
+        HT_LOG("[plugin] listening on UDP %u", port);
     } else {
-        HT_LOG("[plugin] UDP port %u busy, receiver will retry in background", m_config.port);
+        HT_LOG("[plugin] UDP port %u busy, receiver will retry in background", port);
     }
 
     // Nothing may touch game memory until a build profile has been selected -
@@ -173,24 +130,31 @@ void Plugin::Initialize() {
         InstallWorldMarkerHook();
         GetFovControl().Initialize(m_config.fov_override_degrees, m_config.cull_fov_scale);
         InstallAdsStateHook();
-        if (m_config.move_crosshair) {
-            InstallCrosshairHook();
-            // The hit indicator is the game's, not ours, and it belongs on the same
-            // mark as the crosshair - so it follows the same setting.
-            InstallHitIndicatorHook();
-        }
+        InstallCrosshairHook();
+        // The hit indicator is the game's, not ours, and it belongs on the same
+        // mark as the crosshair.
+        InstallHitIndicatorHook();
     }
 
     m_hotkeys = std::make_unique<HotkeyHandler>();
-    m_hotkeys->Start(*this, m_config.toggle_vk, m_config.yaw_mode_vk,
-                     m_config.mode_cycle_vk);
+    m_hotkeys->Start(*this, m_config);
     HT_LOG("[plugin] initialized");
 }
 
-// Called from the hotkey thread; only raises a flag. The work happens in
-// Update() on the render thread. See plugin.h.
+// Called from the hotkey thread. The next mode is computed from the one the
+// render thread last applied, so two presses before one frame are one step; it
+// is stored as the desired mode for Update() to apply on the render thread (see
+// plugin.h), and saved here, off the render thread.
 void Plugin::CycleTrackingMode() {
-    m_modeCycleRequested.store(true, std::memory_order_release);
+    const auto next = static_cast<cameraunlock::TrackingMode>((static_cast<int>(m_session.GetMode()) + 1) % 3);
+    m_desiredMode.store(next);
+    m_modeApplyRequested.store(true, std::memory_order_release);
+
+    const cameraunlock::TrackingModeChannels channels = cameraunlock::EncodeTrackingMode(next);
+    SaveConfig([channels](Config& c) {
+        c.rotation_enabled = channels.rotation_enabled;
+        c.position_enabled = channels.position_enabled;
+    });
 }
 
 // Yaw mode is a plain atomic the render thread reads once per frame, so the
@@ -199,11 +163,12 @@ void Plugin::ToggleYawMode() {
     const bool next = !m_worldSpaceYaw.load();
     m_worldSpaceYaw.store(next);
     HT_LOG("[plugin] yaw mode -> %s", next ? "world-space" : "camera-local");
+    SaveConfig([next](Config& c) { c.world_space_yaw = next; });
 }
 
 void Plugin::ConsumeHotkeyRequests() {
-    if (m_modeCycleRequested.exchange(false, std::memory_order_acquire)) {
-        m_session.CycleMode();
+    if (m_modeApplyRequested.exchange(false, std::memory_order_acquire)) {
+        m_session.SetMode(m_desiredMode.load());
         HT_LOG("[plugin] tracking mode -> %s", TrackingModeName());
     }
 }
@@ -313,9 +278,9 @@ bool Plugin::Update() {
 
     float ox = 0.0f, oy = 0.0f, oz = 0.0f;
     if (m_session.GetPositionOffset(ox, oy, oz)) {
-        m_cachedPosX.store(ox * m_worldScale * blend, std::memory_order_release);
-        m_cachedPosY.store(oy * m_worldScale * blend, std::memory_order_release);
-        m_cachedPosZ.store(oz * m_worldScale * blend, std::memory_order_release);
+        m_cachedPosX.store(ox * kSourceUnitsPerMetre * blend, std::memory_order_release);
+        m_cachedPosY.store(oy * kSourceUnitsPerMetre * blend, std::memory_order_release);
+        m_cachedPosZ.store(oz * kSourceUnitsPerMetre * blend, std::memory_order_release);
         m_cachedPosValid.store(true, std::memory_order_release);
     } else {
         m_cachedPosValid.store(false, std::memory_order_release);

@@ -18,9 +18,10 @@ set "MOD_VERSION=0.0.0"
 set "STATE_FILE=.headtracking-state.json"
 set "FRAMEWORK_TYPE=ASILoader"
 set "ASI_LOADER_NAME=dsound.dll"
-:: Files copied only when they are not already there, so an upgrade keeps
-:: whatever the user tuned. Listing an .ini in MOD_DLLS instead puts it through
-:: the unconditional copy and resets every key on every update.
+:: No config is deployed. The mod creates CameraUnlock.ini at first launch,
+:: importing HeadTracking.ini from an earlier version once, so a copy placed here
+:: would stop that import on an update, and MOD_DLLS's "copy /y" would overwrite
+:: the player's settings on every install.
 set "MOD_SEED_FILES="
 set "MOD_CONTROLS=Controls: End=toggle tracking, PgUp=cycle 6DOF/rotation/position, PgDn=toggle yaw mode. Chords: Ctrl+Shift+Y/G/H."
 set "_SHIM=%SCRIPT_DIR%shared\find-game.ps1"

@@ -31,12 +31,19 @@ clean-all = { cmd = """
     powershell -Command "if (Test-Path 'build') { Remove-Item 'build' -Recurse -Force }; if (Test-Path 'release') { Remove-Item 'release' -Recurse -Force }; Write-Host 'All build artifacts cleaned' -ForegroundColor Green"
 """ }
 
-# Characterization tests for the maths every rendered frame passes through, and the
-# config differential test that holds the frozen legacy reader to the published
-# build's. Needs no game and no engine, so it runs on CI and on a contributor's
-# machine. build-release already builds both test targets, so this only has to run
-# them - and running each exe directly is what makes its exit code the task's.
-test = { cmd = "build/tests/Release/Titanfall2HeadTrackingTests.exe && build/tests/Release/Titanfall2ConfigDifferential.exe && powershell -NoProfile -ExecutionPolicy Bypass -File tests/config_differential/check-frozen.ps1", depends-on = ["build-release"] }
+# Characterization tests for the maths every rendered frame passes through, the config
+# tests that hold the committed CameraUnlock.ini to the table, the config differential
+# test that holds the frozen legacy reader to the published build's and the migration to
+# the frozen reader, and core's canonical config lint over every file it migrated. Needs
+# no game and no engine, so it runs on CI and on a contributor's machine. build-release
+# already builds every test target, so this only has to run them - and running each exe
+# directly is what makes its exit code the task's.
+test = { cmd = "build/tests/Release/Titanfall2HeadTrackingTests.exe && build/tests/Release/Titanfall2ConfigTests.exe && build/tests/Release/Titanfall2ConfigDifferential.exe && node tests/config_differential/lint-migrated.mjs build/tests/Release/migrated && powershell -NoProfile -ExecutionPolicy Bypass -File tests/config_differential/check-frozen.ps1", depends-on = ["build-release"] }
+
+# Rewrites CameraUnlock.ini, the committed config, from the config table after a change to
+# a row, a comment or a default, then writes the launcher manifest's config descriptor
+# per_game from it. The config tests fail until it has run.
+render-config = { cmd = "build/tests/Release/Titanfall2ConfigTests.exe --render-config CameraUnlock.ini && node cameraunlock-core/scripts/encode-seed.mjs", depends-on = ["build-release"] }
 
 # Bump vendored ASI Loader. Manual; commit the diff. CI does not run this.
 update-deps = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/update-deps.ps1" }
@@ -48,6 +55,10 @@ check-fingerprint = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/ch
 
 # Package release ZIP (installer + nexus variants).
 package = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1", depends-on = ["build-release", "test"] }
+
+# Core's manifest validator: the built installer ZIP's launcher manifest and config
+# descriptor, and that neither ZIP carries CameraUnlock.ini or HeadTracking.ini.
+validate-manifest = { cmd = "node cameraunlock-core/scripts/validate-manifest.mjs", depends-on = ["package"] }
 
 # Cut a release: pixi run release <major|minor|patch|nightly|X.Y.Z>.
 # `nightly` short-circuits to release-nightly.ps1, which republishes the rolling

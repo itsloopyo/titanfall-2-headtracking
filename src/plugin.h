@@ -1,9 +1,12 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <memory>
+#include <optional>
 
 #include "config.h"
+#include "cameraunlock/config/config_owner.h"
 #include "cameraunlock/protocol/udp_receiver.h"
 #include "cameraunlock/time/frame_clock.h"
 #include "cameraunlock/tracking/head_tracking_session.h"
@@ -52,6 +55,11 @@ public:
     const Config& GetConfig() const { return m_config; }
 
 private:
+    void LoadConfig();
+    // Applies `change` to CameraUnlock.ini through the owner, on the calling thread. Called
+    // after the new value is already running; a save that fails is logged and the session
+    // keeps it.
+    void SaveConfig(const std::function<void(Config&)>& change);
     void Invalidate();
     void ConsumeHotkeyRequests();
     bool HoldThroughLoss(float deltaTime);
@@ -69,21 +77,20 @@ private:
     static constexpr float kResumeBlendComplete = 5.0f;
 
     Config m_config;
+    // Built on the bootstrap thread by LoadConfig, before the hotkeys start; the hotkey
+    // thread saves through it afterwards.
+    std::optional<cameraunlock::config::ConfigOwner<Config>> m_configOwner;
     std::atomic<bool> m_enabled{false};
     std::atomic<bool> m_worldSpaceYaw{true};
 
-    // Hotkeys run on their own poller thread, and CycleTrackingMode() reaches
-    // deep into the session: it resets position smoothing. Doing that while the
+    // Hotkeys run on their own poller thread, and a mode change reaches deep
+    // into the session: it resets position smoothing. Doing that while the
     // render thread is mid-Process() is a torn read - one frame of camera flick
     // on a keypress, impossible to reproduce on demand. So the hotkey thread
-    // only raises a flag; Update() consumes it on the render thread, between
-    // frames.
-    std::atomic<bool> m_modeCycleRequested{false};
-
-    // Source world units per metre of head movement. The Invert* preferences
-    // are NOT folded in here - they go to the position processor, which applies
-    // them before its asymmetric Z clamp (see ApplyPositionConfig).
-    float m_worldScale = 1.0f;
+    // only stores the mode it wants and raises a flag; Update() applies it on
+    // the render thread, between frames.
+    std::atomic<cameraunlock::TrackingMode> m_desiredMode{cameraunlock::TrackingMode::RotationAndPosition};
+    std::atomic<bool> m_modeApplyRequested{false};
 
     using Session = cameraunlock::HeadTrackingSession<cameraunlock::UdpReceiver>;
     // The session picks between LocalSmoothing and RemoteSmoothing from the

@@ -4,3 +4,5 @@
 *.ps1 text eol=crlf
 # Differential test inputs are byte-exact player files: CRLF, and whatever else a build wrote.
 tests/config_differential/inputs/** -text
+# The committed canonical config is the table's fresh render byte for byte, CRLF included.
+CameraUnlock.ini -text

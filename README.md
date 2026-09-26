@@ -35,7 +35,7 @@ Download [Lopari](https://lopari.app), choose **Titanfall 2**, and click
 2. Extract it anywhere.
 3. Double-click `install.cmd`. It finds your Steam copy of Titanfall 2 and places the Ultimate ASI Loader (as `dsound.dll`) plus `Titanfall2HeadTracking.asi` next to `Titanfall2.exe`.
 4. Configure OpenTrack (or your phone app) to output UDP to `127.0.0.1:4242`. See [Setting Up OpenTrack](#setting-up-opentrack).
-5. Launch the game. The mod writes a default `HeadTracking.ini` next to `Titanfall2.exe` on its first run.
+5. Launch the game. The mod creates `CameraUnlock.ini` next to `Titanfall2.exe` on its first run. See [Configuration](#configuration).
 
 If the installer cannot find your game, point it at the install folder yourself. Either set the environment variable:
 
@@ -56,7 +56,7 @@ For placing the files by hand:
 
 1. Copy `plugins\Titanfall2HeadTracking.asi` from the installer ZIP into your Titanfall 2 folder, next to `Titanfall2.exe`. The `-nexus.zip` release asset contains this file plus `Titanfall2HeadTracking-LICENSE.txt`, laid out for extracting straight into the game folder.
 2. Copy `vendor\ultimate-asi-loader\dinput8.dll` from the installer ZIP into the same folder, renamed to `dsound.dll`. Titanfall 2 imports `dsound.dll`, so that is the proxy name the loader has to use here. The Nexus ZIP does not carry the loader; get it from [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader) if you are installing that way.
-3. Launch the game once. `HeadTracking.ini` and `Titanfall2HeadTracking.log` are created next to `Titanfall2.exe`.
+3. Launch the game once. `CameraUnlock.ini` and `Titanfall2HeadTracking.log` are created next to `Titanfall2.exe`.
 
 ## Setting Up OpenTrack
 
@@ -121,7 +121,9 @@ view sits off to one side, centre it in the tracker.
 
 ## Controls
 
-Two equivalent binding sets, use whichever your keyboard has:
+Two equivalent binding sets, use whichever your keyboard has. These are the
+defaults: each action's keys are a list under `[Hotkeys]` in `CameraUnlock.ini`,
+chords included, and any of them can be changed or removed.
 
 | Action              | Nav-cluster | Chord           |
 |---------------------|-------------|-----------------|
@@ -140,6 +142,11 @@ Centre in your tracker app once you are seated normally: OpenTrack's Center bind
 
 `Page Down` / `Ctrl+Shift+H` switches yaw between world-space (horizon-locked) and camera-local.
 
+The tracking mode and the yaw mode are saved to `CameraUnlock.ini` the moment you
+change them, so the next launch starts with the same choice. Toggling tracking on
+or off with `End` lasts for the session only: each launch starts with tracking on
+or off as `EnableOnStartup` says.
+
 ### Aiming down sights
 
 Head tracking stays on while you aim. The weapon stays where your mouse or
@@ -150,89 +157,130 @@ while the sights are up, because it would move your eye off them.
 
 ## Configuration
 
-`HeadTracking.ini` is created next to `Titanfall2.exe` on first launch. Edit it with any text editor and restart the game to apply. Delete it to reset to defaults.
+<!-- cameraunlock:config -->
+The mod reads its settings from `CameraUnlock.ini` in the game folder, and creates the file when it starts and finds none. Edit it with any text editor.
+
+A setting set to `default` takes its value from `Defaults.ini`, which every head tracking mod that keeps its settings in `CameraUnlock.ini` reads. Head tracking mods that keep their settings in another file do not read it, and neither do earlier versions of this mod. Writing a value in place of `default` changes that setting for this game only. When the mod saves a setting that a hotkey changed in game, it writes the new value in place of `default`, so that setting no longer follows `Defaults.ini` in this game until you set it to `default` again.
+
+`Defaults.ini` is `%AppData%\CameraUnlock\Defaults.ini` on Windows; `$XDG_CONFIG_HOME/CameraUnlock/Defaults.ini` on Linux, or `~/.config/CameraUnlock/Defaults.ini` where `XDG_CONFIG_HOME` is not set, under Wine and Proton too; and `~/Library/Application Support/CameraUnlock/Defaults.ini` on macOS. The mod's log, where it writes one, names the file it read.
+
+When the mod starts and finds no `Defaults.ini`, it creates one holding the built-in values, unless Windows runs the game as a packaged app. The mod never changes `Defaults.ini` after that. Edit it with any text editor.
+
+Earlier versions of the mod kept these settings in `HeadTracking.ini`, in the same folder. The first time this version starts and finds no `CameraUnlock.ini`, it reads your settings from `HeadTracking.ini` and writes them into `CameraUnlock.ini`. It never changes `HeadTracking.ini`, and does not read it again while `CameraUnlock.ini` exists.
+
+A setting that the defaults below set to `default` is written as `default` when the value imported for it equals its default at that start, which is the value `Defaults.ini` gives it, or the built-in value where `Defaults.ini` gives none. It then follows `Defaults.ini`. Every other setting is written with the value imported for it. `RotationEnabled` and `PositionEnabled` are one setting here, the tracking mode, so both are written as `default` or neither is.
+
+Comments, and keys the mod never read, are not carried over. Nor are these, where your old file had them:
+
+- Reticle settings, and a key that toggled the reticle.
+- A sensitivity, scale, deadzone, response curve or axis inversion you changed from its default. Set these in your tracker instead.
+- The setting for a feature that earlier versions shipped switched off while it was untested. It now follows the mod's default.
+
+An older version of the mod reads `HeadTracking.ini` and never reads `CameraUnlock.ini`, so a setting you change after updating is not in `HeadTracking.ini`.
+
+Deleting only `CameraUnlock.ini` makes the next start read `HeadTracking.ini` again. To go back to the defaults, replace everything in `CameraUnlock.ini` with the defaults below. Every setting they set to `default` then follows `Defaults.ini`.
+
+The built-in value of each setting set to `default` below:
+
+- `UdpPort=4242`
+- `EnableOnStartup=true`
+- `WorldSpaceYaw=true`
+- `RotationEnabled=true`
+- `LocalSmoothing=0.0`
+- `RemoteSmoothing=0.15`
+- `PositionEnabled=true`
+- `PositionLimitX=0.3`
+- `PositionLimitY=0.2`
+- `PositionLimitYDown=0.2`
+- `PositionLimitZ=0.4`
+- `PositionLimitZBack=0.1`
+- `ToggleKey=End, Ctrl+Shift+Y`
+- `CycleTrackingModeKey=PageUp, Ctrl+Shift+G`
+- `YawModeKey=PageDown, Ctrl+Shift+H`
+
+With every setting at its default, the file reads:
 
 ```ini
-; Titanfall 2 head tracking - default config
+; Titanfall 2 head tracking settings.
+; Comments start with ; and go on their own line. Text after a value is part of the value.
+; Hotkeys are key names such as End, PageUp or Ctrl+Shift+Y. Separate several with commas; leave empty for none.
+; A setting set to default takes its value from Defaults.ini, which every head tracking mod
+; that keeps its settings in CameraUnlock.ini reads: %AppData%\CameraUnlock\Defaults.ini on
+; Windows, $XDG_CONFIG_HOME/CameraUnlock/Defaults.ini (normally ~/.config/CameraUnlock) on
+; Linux, under Wine and Proton too, and ~/Library/Application Support/CameraUnlock/Defaults.ini
+; on macOS. The log names the file it read. Write a value instead of default to change that
+; setting for this game only.
+
+[CameraUnlock]
+; Written by the mod. Leave this section in place.
+ConfigFormat=1
 
 [Network]
-Port=4242
-EnableOnStartup=1
+; UDP port the mod receives tracker data on (OpenTrack protocol).
+UdpPort=default
 
-[Sensitivity]
-Yaw=1
-Pitch=1
-Roll=1
-InvertYaw=0
-InvertPitch=0
-InvertRoll=0
+[General]
+; true: head tracking is on when the game starts. ToggleKey turns it on and off.
+EnableOnStartup=default
+; true: yaw turns around the world's up axis. false: around the camera's own up axis.
+WorldSpaceYaw=default
+; true: turning your head turns the view.
+; Tracking mode at startup, with PositionEnabled. The mode hotkey changes both.
+RotationEnabled=default
 
 [Smoothing]
-; Smoothing applied when the tracker runs on this machine (loopback).
-; 0 = no smoothing, 1 = heavy. Covers rotation and position.
-LocalSmoothing=0
-; Smoothing applied when the tracker is a remote device on the network.
-; 0 = no smoothing, 1 = heavy. Covers rotation and position.
-RemoteSmoothing=0.15
-
-[Deadzone]
-Yaw=0
-Pitch=0
-Roll=0
+; Smoothing when the tracker runs on this PC. 0 is the least, 1 the most.
+LocalSmoothing=default
+; Smoothing when the tracker is another device on the network, such as a phone.
+; 0 is the least, 1 the most.
+RemoteSmoothing=default
 
 [Position]
-; 6DOF head position, applied to the render view origin only
-Enabled=1
-; WorldScale = Source units per metre of head movement (1 unit = 1 inch; 39.37 = 1:1)
-WorldScale=39.37
-SensX=1
-SensY=1
-SensZ=1
-; X and Z are inverted by default: the trackers this mod is used with send
-; sideways and forward the other way round from the mod's own frame. Set them
-; to 0 if leaning moves the camera the wrong way for yours.
-InvertX=1
-InvertY=0
-InvertZ=1
-; Movement envelope in metres before world scaling
-LimitX=0.3
-LimitY=0.2
-LimitZ=0.4
-LimitZBack=0.1
+; true: moving your head moves the view.
+; Tracking mode at startup, with RotationEnabled. The mode hotkey changes both.
+PositionEnabled=default
+; How far, in metres, leaning left or right can move the view.
+PositionLimitX=default
+; How far, in metres, raising your head can move the view.
+PositionLimitY=default
+; How far, in metres, lowering your head can move the view.
+PositionLimitYDown=default
+; How far, in metres, leaning forward can move the view.
+PositionLimitZ=default
+; How far, in metres, leaning back can move the view.
+PositionLimitZBack=default
 
 [Hotkeys]
-Toggle=0x23
-YawMode=0x22
-; Page Up: cycle 6DOF -> rotation-only -> position-only
-ModeCycle=0x21
+; Turns head tracking on and off.
+ToggleKey=default
+; Changes the tracking mode: rotation and position, rotation only, position only.
+CycleTrackingModeKey=default
+; Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw).
+YawModeKey=default
 
 [View]
-; true = horizon-locked yaw (default), false = camera-local yaw
-WorldSpaceYaw=1
-; Field of view in degrees, the same numbers the game's own slider uses.
-; 0 follows that slider live. Anything else overrides it and can go outside
-; the 70-119 the slider allows - 50 to 130 is accepted.
-FieldOfView=0
-; How much wider than the drawn FOV the engine is told to cull. The head turn
-; itself needs none of this - the culling frustum is aimed where you are
-; looking - so this only covers a positional lean at the very edge of the
-; frame. Above 1.0 costs frames for geometry that is submitted and not drawn.
+; Field of view in degrees, on the same scale as the game's own slider.
+; 0 follows that slider as you move it. Any other value is drawn instead, held to
+; 50 to 130, so it can go outside the 70 to 119 the slider allows.
+FieldOfView=0.0
+; How much wider than the drawn field of view the game is told to cull, 1.0 to 1.7.
+; 1.0 adds nothing: the culled view already turns with your head. Raise it only if
+; a lean shows missing scenery at the edge of the screen; it costs frames.
 CullFovScale=1.0
-; Move the game's own crosshair to where the gun is pointing, and the hit mark
-; that flashes on a connecting shot along with it. false leaves both pinned to
-; the centre of the screen, where they mark the aim only while your head is
-; centred.
-MoveCrosshair=1
 
 [Debug]
-; Per-frame view diagnostics. The lifecycle lines - game build, profile
-; match, hook install, map gate, crash report - are always written.
-LogToFile=0
-; One-shot render view field dump, for rederiving offsets on a new build
-DumpViewSetup=0
+; true: write a line per frame about the view to Titanfall2HeadTracking.log.
+; The game build, the hook install, the map gate and any crash are logged either way.
+LogToFile=false
+; true: write the game's render view data to the log once, for finding its
+; layout again after a game update.
+DumpViewSetup=false
 ```
+<!-- /cameraunlock:config -->
 
-`WorldScale` is the main lean tuning knob: lower it if leaning swings the weapon further across the screen than you want.
+The mod has no sensitivity, deadzone, world scale or axis inversion settings. It
+applies the pose your tracker sends, so set those in the tracker. The game's own
+crosshair always follows your aim, and no setting turns that off.
 
 ## Troubleshooting
 
@@ -256,7 +304,7 @@ Start with `Titanfall2HeadTracking.log` next to `Titanfall2.exe`. It always reco
 
 - Raise `RemoteSmoothing` if the tracker is a phone or another device on the network. `0.15` is the default and `0.3` is noticeably heavier.
 - Raise `LocalSmoothing` above `0` only if a tracker on this PC is genuinely noisy. It defaults to `0` because a wired source is already stable and smoothing only costs latency.
-- Add a small `[Deadzone]` value in degrees to kill micro-jitter around center.
+- For micro-jitter around centre, add a deadzone or a filter in your tracker app. The mod has no deadzone of its own.
 - A webcam tracker needs light on your face and a frame rate the camera can sustain. A dark room is the usual cause of unstable neuralnet tracking.
 
 **The weapon is off to one side when I aim down sights.** Your head is turned:
@@ -266,13 +314,13 @@ move your aim to where you are looking.
 **Wrong rotation axis or wrong direction**
 
 - If yaw feels wrong when looking far up or down, toggle between world-locked and camera-local yaw with `Page Down` (or `Ctrl+Shift+H`). World-locked is the default and is horizon-stable; camera-local follows the camera's current up axis.
-- If an axis moves the opposite way to your head, set the matching `InvertYaw` / `InvertPitch` / `InvertRoll` (or `InvertX` / `InvertY` / `InvertZ`) to `1`.
+- If an axis moves the opposite way to your head, invert that axis in your tracker app. The mod has no inversion settings of its own.
 - If the centre is off after you sit down, centre it in your tracker app (OpenTrack's Center bind, or Headcam's CENTER button).
 
 ### Known limitations
 
 - **The crosshair follows the gun, not your head.** The game's own crosshair is moved to where your shot will land in the head-tracked picture, so it stays on the aim however far you look away. The hit mark that flashes when a shot connects rides along with it.
-- **Leaning swings the weapon a long way across the screen.** Your gun sits under a meter from your eye, so a real 30 cm lean moves it much further than it moves the world, which is what leaning does to something held in your hands. Lower `[Position] WorldScale` if you want less of it.
+- **Leaning swings the weapon a long way across the screen.** Your gun sits under a meter from your eye, so a real 30 cm lean moves it much further than it moves the world, which is what leaning does to something held in your hands.
 - **The 3D skybox takes head rotation but not lean.** Not noticeable in normal play; a lean at skybox scale would need the sky's own scale factor applied.
 
 ## Updating

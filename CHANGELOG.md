@@ -34,17 +34,13 @@
 - Added gameplay-only enforcement: tracking is suppressed whenever the host's
   pause flag is set, which covers the pause menu, the between-mission logbook
   screen and the automatic pause on losing window focus.
-- Added ADS handling that hands the view back to the gun: raising the sights
-  eases the head delta out over 150 ms, so the frame settles onto the aim -
-  which is where the crosshair already was - and both the head rotation and the
-  positional lean stay off until the sights come down, when tracking eases back
-  in over 250 ms. Head TILT is the exception and keeps working throughout, in
-  every ADS mode: a tilt moves neither your eye off the barrel nor the aim off
-  the middle of the screen, so levelling it on every aim would be two horizon
-  jolts for nothing. The player's aim is never touched. Aiming is read from the
-  game's own sights flag rather than from a zoom factor, so it is detected on
-  weapons that have sights but no magnification - which is most of them, and
-  where a moving eye position makes the sights unusable.
+- Added ADS handling. Head tracking stays on while you aim down sights, and the
+  positional lean eases out over 150 ms as the sights come up, because it moves
+  your eye off them, then back in over 250 ms when they come down. Head movement
+  is scaled to the zoom, so a scope does not magnify it. The player's aim is
+  never touched. Aiming is read from the game's own sights flag rather than from
+  a zoom factor, so it is detected on weapons that have sights but no
+  magnification.
 - Added parallax correction to the crosshair. Leaning moves the eye the frame is
   drawn from but not the eye the shot comes from, so a crosshair projected as a
   direction slides off whatever the player was aiming at - further the closer the
@@ -58,9 +54,8 @@
   whatever you are looking at rather than where you are aiming. The game's OWN
   crosshair is now moved to where the aim projects into the head-tracked
   picture: same crosshair, same weapon-specific shape and spread, just drawn
-  where the gun points. It returns to the centre with the sights up, with
-  tracking off and outside the campaign, and is hidden outright if the head
-  turns so far that the gun is behind the picture.
+  where the gun points, with the sights up or down. It is hidden outright if the
+  head turns so far that the gun is behind the picture.
 - Added world-space and camera-local yaw modes, switchable at runtime
   (Page Down / Ctrl+Shift+H).
 - Added horizon-locked 6DOF, so the lean follows the body and stays correct
@@ -87,16 +82,13 @@
 - Deleting only `CameraUnlock.ini` makes the next start read `HeadTracking.ini` again. To go back to the defaults, replace everything in `CameraUnlock.ini` with the defaults the README shows. Every setting they set to `default` then follows `Defaults.ini`.
 - Hotkeys are written as key names, and each hotkey lists every key that triggers it, the Ctrl+Shift chord included: `ToggleKey=End, Ctrl+Shift+Y`. `[Hotkeys] Toggle`, `ModeCycle` and `YawMode`, which held key codes, are now `ToggleKey`, `CycleTrackingModeKey` and `YawModeKey`, and the chords, fixed in code before, can be changed or removed like any other key.
 - The tracking mode (`Page Up`) and the yaw mode (`Page Down`) are saved to `CameraUnlock.ini` the moment you change them, so the next launch starts with the same choice. They lasted for the session only before. `End` still changes the session only.
-- `[Network] Port` is now `UdpPort`, `[Network] EnableOnStartup` and `[View] WorldSpaceYaw` move to `[General]`, and `[Position] LimitX`, `LimitY`, `LimitZ` and `LimitZBack` are now `PositionLimitX`, `PositionLimitY`, `PositionLimitZ` and `PositionLimitZBack`. `LimitY` bounded leaning down as well as up; the import writes its value into both `PositionLimitY` and the new `PositionLimitYDown`. `[Position] Enabled` chose the tracking mode the game started in and is now that mode, as `RotationEnabled` and `PositionEnabled`. `[View] FieldOfView` and `CullFovScale` and `[Debug] LogToFile` and `DumpViewSetup` keep their names.
+- `[Network] Port` is now `UdpPort`, `[Network] EnableOnStartup` and `[View] WorldSpaceYaw` move to `[General]`, and `[Position] LimitX`, `LimitY`, `LimitZ` and `LimitZBack` are now `PositionLimitX`, `PositionLimitY`, `PositionLimitZ` and `PositionLimitZBack`. The import writes `LimitY` into both `PositionLimitY` and the new `PositionLimitYDown`, since it limits leaning down as well as up (see the next item). `[Position] Enabled` chose the tracking mode the game started in and is now that mode, as `RotationEnabled` and `PositionEnabled`. `[View] FieldOfView` and `CullFovScale` and `[Debug] LogToFile` and `DumpViewSetup` keep their names.
+- `[Position] LimitY` now limits leaning down as well as up (0859563). The dev build held leaning down to 0.20 m whatever `LimitY` said, so this changes nothing unless you set `LimitY` to something other than 0.20.
 - Removed recentring from the mod. The `Home` / `Ctrl+Shift+T` hotkey and the
   `[Hotkeys] Recenter` key are gone and the tracker pose is applied as sent.
   Every tracker app centres itself, so a mod-side centre sat in series with the
   tracker's own and the two drifted apart. Centre in your tracker app instead:
   OpenTrack's Center bind, or the CENTER button in Headcam.
-- Changed `[Position] InvertX` and `InvertZ` to default to on. The trackers this
-  mod is used with send sideways and forward the other way round from the shared
-  core's frame, so without it a lean left moved the camera right and leaning in
-  pulled the view back.
 - Changed smoothing to two keys in `[Smoothing]`: `LocalSmoothing`
   (default 0.0) for a tracker running on this machine and `RemoteSmoothing`
   (default 0.15) for a remote device on the network, selected per connection
@@ -130,10 +122,6 @@
   crash report) never being written. `[Debug] LogToFile` closed the log file
   three lines into startup, so the one thing the README asks a user to send was
   a zero-byte file; the key now gates only the per-frame `[view]` diagnostics.
-- Fixed `[Position] InvertZ` mirroring the lean envelope. Inversion is applied
-  before the asymmetric Z clamp, so a forward lean now gets the generous 0.40 m
-  allowance whichever way the key is set; previously turning it on left the
-  forward lean with the 0.10 m backward allowance.
 - Fixed a profile that matches but is incomplete, or matches `client.dll` but
   not `engine.dll`, stopping the search. It now skips to the next profile, so
   adding a profile for a new patch cannot strand users on an older build.
@@ -151,13 +139,14 @@
   it now runs on the render thread.
 - Fixed head tracking snapping to the full pose on the first packet after a
   tracking dropout; it now blends back in.
-- Fixed out-of-range position limits, sensitivities and `WorldScale` in a
-  hand-edited INI being passed through to the view matrix; they are now bounded.
+- Fixed an out-of-range position limit in a hand-edited config being passed
+  through to the view matrix. A value outside the range a setting accepts now
+  keeps that setting's default.
 - Fixed tracking being applied over a loading screen by suppressing it for a
   moment after a level name appears.
 
 ### Removed
-- The sensitivity, scale, deadzone, response curve and axis inversion settings: `[Sensitivity] Yaw`, `Pitch`, `Roll`, `InvertYaw`, `InvertPitch` and `InvertRoll`, `[Deadzone] Yaw`, `Pitch` and `Roll`, and `[Position] WorldScale`, `SensX`, `SensY`, `SensZ`, `InvertX`, `InvertY` and `InvertZ`. Set these in your tracker app instead. The x and z inversions every earlier version shipped switched on (`InvertX=true`, `InvertZ=true`) and the shipped `WorldScale` of 39.37 Source units per metre are now part of how the mod converts the tracker's axes to the game's, so leaning goes the same way and as far as it did.
+- The sensitivity, scale, deadzone, response curve and axis inversion settings: `[Sensitivity] Yaw`, `Pitch`, `Roll`, `InvertYaw`, `InvertPitch` and `InvertRoll`, `[Deadzone] Yaw`, `Pitch` and `Roll`, and `[Position] WorldScale`, `SensX`, `SensY`, `SensZ`, `InvertX`, `InvertY` and `InvertZ`. Set these in your tracker app instead. The x and z inversions every earlier version shipped switched on (`InvertX=true`, `InvertZ=true`) and the shipped `WorldScale` of 39.37 Source units per metre are now part of how the mod converts the tracker's axes to the game's, so leaning goes the same way and as far as it did. The z flip is applied before the lean is clamped, so leaning in is limited by `PositionLimitZ` and pulling back by `PositionLimitZBack`.
 - With these settings at their shipped defaults the camera moves as it did before.
 - `[View] MoveCrosshair`. The game's crosshair, and the hit mark that flashes on a connecting shot, always follow the aim.
 - `[View] AdsMode` is no longer read: head tracking carries on through the sights in every case, and the lean eases out while they are up (ea74da9).

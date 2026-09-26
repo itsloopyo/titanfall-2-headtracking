@@ -72,3 +72,7 @@ install = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/deploy.ps1 R
 uninstall = "scripts\\uninstall.cmd /y"
 
 [dependencies]
+# The build uses the system CMake and Visual Studio. nodejs runs the migrated-config lint in
+# `test` and core's encode-seed.mjs and validate-manifest.mjs, pinned to the build
+# cameraunlock-core's own lock resolved, so nothing newer than it lands.
+nodejs = "==26.5.0"

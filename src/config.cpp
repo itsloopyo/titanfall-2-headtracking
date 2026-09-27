@@ -22,8 +22,8 @@ using cameraunlock::input::KeyBinding;
 using cameraunlock::input::KeyModifiers;
 
 // A legacy hotkey code and the Ctrl+Shift chord every earlier build registered beside it, as
-// one key list. A code of 0 registered nothing, and a code outside 0x01-0xFE is unbound by
-// normalisation N1, which records it.
+// one key list. A code of 0 registered nothing, and a code outside 0x01-0xFE (N1) or on a Ctrl,
+// Shift or Alt key alone (N3) is unbound and recorded.
 std::string KeyList(int vk, char chordLetter, const char* key, std::vector<cfg::DroppedValue>& dropped) {
     const std::string code = cfg::LegacyVirtualKeyToBindings(vk, "Hotkeys", key, dropped);
     const std::string chord = cameraunlock::input::FormatKeyBindings(
@@ -145,9 +145,30 @@ cfg::ImportResult MapLegacyConfig(legacy::ReadStatus status, const legacy::Confi
     out.cycle_tracking_mode_key_name = KeyList(read.mode_cycle_vk, 'G', "ModeCycle", dropped);
     out.yaw_mode_key_name = KeyList(read.yaw_mode_vk, 'H', "YawMode", dropped);
 
+    // A row the player never changed from what the build shipped follows Defaults.ini. LimitY
+    // stood for both vertical bounds, and every build registered each hotkey's chord beside its
+    // code, so the code alone says whether the player changed the row.
+    using C = cfg::schema::Concept;
+    const legacy::Config shipped;
+    cfg::LegacyFollowsDefaultsIni follows;
+    follows.Setting(C::UdpPort, read.port, shipped.port);
+    follows.Setting(C::EnableOnStartup, read.enabled_on_startup, shipped.enabled_on_startup);
+    follows.Setting(C::WorldSpaceYaw, read.world_space_yaw, shipped.world_space_yaw);
+    follows.TrackingMode(read.pos_enabled, shipped.pos_enabled);
+    follows.Setting(C::LocalSmoothing, read.local_smoothing, shipped.local_smoothing);
+    follows.Setting(C::RemoteSmoothing, read.remote_smoothing, shipped.remote_smoothing);
+    follows.Setting(C::PositionLimitX, read.pos_limit_x, shipped.pos_limit_x);
+    follows.Setting(C::PositionLimitY, read.pos_limit_y, shipped.pos_limit_y);
+    follows.Setting(C::PositionLimitYDown, read.pos_limit_y, shipped.pos_limit_y);
+    follows.Setting(C::PositionLimitZ, read.pos_limit_z, shipped.pos_limit_z);
+    follows.Setting(C::PositionLimitZBack, read.pos_limit_z_back, shipped.pos_limit_z_back);
+    follows.Setting(C::ToggleKey, read.toggle_vk, shipped.toggle_vk);
+    follows.Setting(C::CycleTrackingModeKey, read.mode_cycle_vk, shipped.mode_cycle_vk);
+    follows.Setting(C::YawModeKey, read.yaw_mode_vk, shipped.yaw_mode_vk);
+
     return status == legacy::ReadStatus::NotOpened
-               ? cfg::ImportResult::Absent(std::move(dropped), std::move(shaping))
-               : cfg::ImportResult::Imported(std::move(dropped), std::move(shaping));
+               ? cfg::ImportResult::Absent(std::move(dropped), std::move(shaping), follows.Concepts())
+               : cfg::ImportResult::Imported(std::move(dropped), std::move(shaping), follows.Concepts());
 }
 
 cfg::LegacyImport<Config> LegacyConfigImport() {

@@ -85,6 +85,13 @@ try {
     exit 1
 }
 
+try {
+    Assert-ReleaseNotBelowCanonicalSince -RepoRoot $ProjectRoot -Version $target
+} catch {
+    Write-Error "Error: $($_.Exception.Message)"
+    exit 1
+}
+
 $tag = "v$target"
 $changelogPath = Join-Path $ProjectRoot 'CHANGELOG.md'
 

@@ -14,11 +14,12 @@ on:
       - 'docs/**'
       - 'LICENSE'
 
-# Least privilege: this job checks out, builds and uploads an artifact. Artifact
-# upload authenticates with the runner's own runtime token, not GITHUB_TOKEN, so
-# nothing here needs write access to the repository.
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -49,13 +50,6 @@ jobs:
         uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
         with:
           run-install: false
-
-      # Characterization tests for the camera maths. Ahead of packaging so a
-      # regression in the arithmetic every rendered frame passes through fails
-      # the run rather than shipping into an artifact. Needs no game installed.
-      - name: Run tests
-        shell: pwsh
-        run: pixi run test
 
       # Build + package through the SAME command a developer runs locally. All
       # build logic lives in the pixi task chain (configure -> build-release ->

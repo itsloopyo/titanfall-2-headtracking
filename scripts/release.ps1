@@ -52,18 +52,6 @@ if ($Version -eq 'nightly') {
 
 Import-Module (Join-Path $ProjectRoot 'cameraunlock-core/powershell/ReleaseWorkflow.psm1') -Force
 
-# Mirrors New-ChangelogFromCommits' insertion so a -Force maintenance entry
-# lands in the same place with the same shape.
-function Add-MaintenanceChangelogEntry {
-    param([string]$Path, [string]$NewVersion)
-    $date = Get-Date -Format 'yyyy-MM-dd'
-    $entry = "## [$NewVersion] - $date`n`n### Changed`n`n- Maintenance release (no user-facing changes).`n`n"
-    $changelog = Get-Content $Path -Raw
-    $changelog = $changelog -replace '(?s)(# Changelog.*?\n\n)', "`$1$entry"
-    $changelog = $changelog.TrimEnd() + "`n"
-    Set-Content $Path $changelog -NoNewline
-}
-
 function Write-NoBom {
     param([string]$Path, [string]$Text)
     [System.IO.File]::WriteAllText($Path, $Text, (New-Object System.Text.UTF8Encoding $false))
@@ -123,35 +111,23 @@ Write-Host "Releasing $current -> $target" -ForegroundColor Cyan
 # leaves a clean tree instead of stranding a half-applied version bump with
 # no tag.
 Write-Host "Generating CHANGELOG from commits..." -ForegroundColor Cyan
-$hasExistingTags = git -C $ProjectRoot tag -l 2>$null
-if (-not $hasExistingTags) {
-    if (-not (Test-Path $changelogPath)) {
-        $date = Get-Date -Format 'yyyy-MM-dd'
-        Set-Content $changelogPath "# Changelog`n`n## [$target] - $date`n`nFirst release.`n"
-        Write-Host "  Wrote initial CHANGELOG.md" -ForegroundColor Gray
+try {
+    $changelogArgs = @{
+        ChangelogPath = $changelogPath
+        Version       = $target
+        ArtifactPaths = @(
+            'src/',
+            'cameraunlock-core',
+            'scripts/install.cmd',
+            'scripts/uninstall.cmd'
+        )
+        Maintenance   = [bool]$Force
     }
-} else {
-    try {
-        $changelogArgs = @{
-            ChangelogPath = $changelogPath
-            Version       = $target
-            ArtifactPaths = @(
-                'src/',
-                'cameraunlock-core',
-                'scripts/install.cmd',
-                'scripts/uninstall.cmd'
-            )
-        }
-        New-ChangelogFromCommits @changelogArgs | Out-Null
-    } catch {
-        if (-not $Force) {
-            Write-Error "Error: $($_.Exception.Message)"
-            Write-Host "No user-facing changes to release. Re-run with -Force for a maintenance release." -ForegroundColor Yellow
-            exit 1
-        }
-        Write-Host "No user-facing commits since last tag - writing maintenance entry (-Force)." -ForegroundColor Yellow
-        Add-MaintenanceChangelogEntry -Path $changelogPath -NewVersion $target
-    }
+    New-ChangelogFromCommits @changelogArgs | Out-Null
+} catch {
+    Write-Error "Error: $($_.Exception.Message)"
+    Write-Host "No user-facing changes to release. Re-run with -Force for a maintenance release." -ForegroundColor Yellow
+    exit 1
 }
 
 # --- 4. Bump the canonical version (CMakeLists.txt) + derived copies ---

@@ -30,6 +30,24 @@ if (-not $modulePath) {
 }
 Import-Module $modulePath -Force
 
+# Not Get-FileHash: Windows PowerShell 5.1 autoloads it from a script module,
+# and a powershell.exe started from pwsh (GitHub Actions' shell: pwsh)
+# inherits pwsh's PSModulePath, resolves the Core-only
+# Microsoft.PowerShell.Utility first and reports the cmdlet as not recognized.
+function Get-Sha256Hex {
+    [OutputType([string])]
+    param([Parameter(Mandatory)][string]$LiteralPath)
+
+    $sha    = [System.Security.Cryptography.SHA256]::Create()
+    $stream = [System.IO.File]::OpenRead((Convert-Path -LiteralPath $LiteralPath))
+    try {
+        return [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $stream.Dispose()
+        $sha.Dispose()
+    }
+}
+
 # --- CALL BLOCK ----------------------------------------------------------
 # Titanfall 2 is 64-bit Source Engine -> Ultimate ASI Loader x64. The x64
 # release asset (Ultimate-ASI-Loader_x64.zip) is a wrapper zip containing a
@@ -69,7 +87,7 @@ if ($bytes.Length -ge 2 -and $bytes[0] -eq 0x50 -and $bytes[1] -eq 0x4B) {
 # The module's SHA-256 line covers the wrapper zip, which is not what we commit.
 # Record the unwrapped DLL's hash too, so the committed artifact is verifiable.
 $readme  = Join-Path $vendorDir 'README.md'
-$dllHash = (Get-FileHash -Path $saved -Algorithm SHA256).Hash.ToLowerInvariant()
+$dllHash = Get-Sha256Hex -LiteralPath $saved
 $lines   = Get-Content $readme
 $anchor  = ($lines | Select-String -SimpleMatch '- SHA-256:' | Select-Object -First 1).LineNumber
 if (-not $anchor) { throw "vendor README.md has no '- SHA-256:' line to anchor the DLL hash after." }
